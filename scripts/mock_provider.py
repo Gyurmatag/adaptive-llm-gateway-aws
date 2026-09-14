@@ -33,11 +33,21 @@ app = FastAPI(title="mock provider")
 _EMBED_DIM = 256
 
 # model -> (P(good answer), mean latency ms, jitter ms)
+#
+# The quality ladder is deliberately well spaced. Two models whose true
+# quality differs by 0.04 are genuinely hard to tell apart, and a bandit
+# sampling a few hundred times will not separate them inside a 17 minute
+# window - correctly, because there is almost nothing to find. Real fleets are
+# often like that; a stand-in provider for a stage demo should not be, or the
+# headline visual is four curves sitting on top of each other.
+#
+# Adjacent arms are ~0.10 apart here against a posterior sd of ~0.04 after a
+# few hundred observations, so the separation is real rather than staged.
 PROFILES = {
-    "mock-premium": (0.93, 900, 300),
-    "mock-gpt":     (0.89, 750, 250),
-    "mock-mid":     (0.83, 420, 150),
-    "mock-cheap":   (0.78, 260, 90),
+    "mock-premium": (0.95, 900, 300),
+    "mock-gpt":     (0.86, 750, 250),
+    "mock-mid":     (0.76, 420, 150),
+    "mock-cheap":   (0.64, 260, 90),
     "mock-judge":   (0.99, 120, 40),
 }
 GOOD = ("Yes. The short answer is that it depends on the workload, and the "
@@ -105,8 +115,18 @@ async def completions(req: Request):
 
     # If this is the judge scoring something, answer in the judge's format so
     # the reward path is exercised exactly as it will be in production.
+    #
+    # The score MUST depend on the answer being judged. An earlier version
+    # returned uniform(0.55, 0.99) regardless, which meant every arm's reward
+    # was drawn from the same distribution and all four posteriors converged on
+    # the same value forever - the curves never separated no matter how long
+    # the soak ran, and nothing looked broken. A judge that does not read the
+    # answer is a random number generator with a job title.
     if "Score the answer" in last or "grading an assistant answer" in last:
-        text = json.dumps({"score": round(random.uniform(0.55, 0.99), 2)})
+        answered_poorly = POOR in last
+        score = (round(random.uniform(0.15, 0.55), 2) if answered_poorly
+                 else round(random.uniform(0.78, 0.99), 2))
+        text = json.dumps({"score": score})
     else:
         text = GOOD if random.random() < q else POOR
 

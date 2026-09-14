@@ -31,10 +31,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 # Deliberately set so the CHEAP arm is genuinely good but not the best, which
 # is the interesting case and the one the talk claims.
 ARMS = {
-    "claude-sonnet":  (0.92, 6.0e-6),
-    "gpt-on-bedrock": (0.89, 3.4e-6),
-    "ipr-nova":       (0.82, 6.1e-7),
-    "nova-lite":      (0.78, 1.05e-7),
+    "claude-sonnet":  (0.95, 6.0e-6),
+    "gpt-on-bedrock": (0.86, 3.4e-6),
+    "ipr-nova":       (0.76, 6.1e-7),
+    "nova-lite":      (0.64, 1.05e-7),
 }
 
 
