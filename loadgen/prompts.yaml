@@ -1,0 +1,38 @@
+# Mixed prompt pool for the stage load generator.
+#
+# The mix matters more than the prompts. Roughly 70% "easy" and 30% "hard" is
+# what makes the demo honest: the bandit should discover that the cheap arm
+# carries most of the traffic, which is exactly the traffic-mix failure mode
+# slide 19 warns about. Saying that out loud while the audience watches it
+# happen is stronger than hiding it.
+
+easy:
+  weight: 0.70
+  prompts:
+    - "What is the capital of Hungary?"
+    - "Convert 450 kilometres to miles."
+    - "List three benefits of connection pooling in one sentence each."
+    - "What does the acronym SLA stand for?"
+    - "Give me a one-sentence definition of idempotency."
+    - "What year was the Apollo 11 moon landing?"
+    - "Name the four ACID properties."
+    - "What is the default port for PostgreSQL?"
+    - "Spell out what TTL means in caching."
+    - "What is the boiling point of water at sea level in Celsius?"
+    - "Translate 'good morning' into Hungarian."
+    - "How many bytes are in a kibibyte?"
+    - "What does HTTP status 429 mean?"
+    - "Give a one-line description of what a load balancer does."
+    - "What is the difference between a list and a tuple in Python?"
+
+hard:
+  weight: 0.30
+  prompts:
+    - "A service shows p50 latency of 120ms and p99 of 4.2s under steady load, with CPU at 30%. Give the three most likely causes in order of probability and say how you would distinguish them."
+    - "Explain why a context-free multi-armed bandit optimising over a mixed traffic workload can silently degrade the minority of hard requests, and describe two mitigations with their trade-offs."
+    - "We cache LLM responses by embedding similarity at a 0.85 threshold. Explain concretely why this breaks on multi-turn agent conversations and what you would change."
+    - "Write a Python function that merges overlapping intervals, then state its time complexity and one edge case that naive implementations get wrong."
+    - "Compare optimistic and pessimistic locking for a booking system with 3% contention, and say which you would choose and why."
+    - "An ALB terminates streaming HTTP responses at 60 seconds while the backend keeps writing. Explain the interaction and how you would configure both sides."
+    - "Design the reward signal for a router choosing between three LLMs when you have no human feedback. Name the failure modes of your design."
+    - "Explain the difference between a prompt cache and a response cache for LLM serving, including where each sits relative to the routing decision."

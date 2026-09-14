@@ -39,3 +39,4 @@ loadgen/results/
 *.log
 .DS_Store
 handoff/recordings/
+.venv/
