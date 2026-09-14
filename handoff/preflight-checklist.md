@@ -55,12 +55,18 @@ cannot be done in advance.
 Run before flipping the repo public, and again before the talk:
 
 ```bash
-grep -rEn '[0-9]{12}|arn:aws:[a-z0-9-]*:[a-z0-9-]*:[0-9]{12}' \
+# \b matters: without word boundaries this matches 12-digit runs inside
+# floating point numbers (token costs, similarity scores) and buries the
+# real hits in noise.
+grep -rEn '\b[0-9]{12}\b|arn:aws:[a-z0-9-]+:[a-z0-9-]*:[0-9]{12}:' \
   --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=.next \
   --exclude-dir=upstream --exclude-dir=.venv .
 ```
 
-Current result: **clean**. Account IDs and ARNs never enter the repo by
+Current result: **clean**. The only `arn:aws:` strings in the repo are a
+foundation-model ARN template (which has an empty account field by
+construction) and an AWS-managed IAM policy ARN. Neither carries an account
+identifier. Account IDs and ARNs never enter the repo by
 construction - `bootstrap.sh` writes the prompt router ARNs to `config/.env`,
 which is gitignored, and `.env.example` carries placeholders only. The one
 place an account ID could leak is a screenshot, so every image in `handoff/`
