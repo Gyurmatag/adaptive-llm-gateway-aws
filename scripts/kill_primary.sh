@@ -27,13 +27,30 @@ fi
 
 echo "==> killing '$TARGET' on $BASE"
 
+# Match on model_info.id, NOT model_name.
+#
+# Every arm appears twice in the model list: once under its own model_name so
+# Demo 1 can address it directly, and once inside the router group with
+# model_info.id set to the arm name. Matching by model_name finds the DIRECT
+# deployment and zeroing that one does nothing to the bandit - the arm keeps
+# taking traffic. Observed: 68 of the last 75 routing decisions still went to
+# a model that had just been "killed", with the error counter correctly at
+# zero and the dashboard looking exactly as if the failover had worked.
+ROUTER_GROUP="${ROUTER_GROUP:-demo-router}"
 MODEL_ID="$(curl -sS -H "Authorization: Bearer $KEY" "$BASE/model/info" \
-  | python3 -c "
-import json,sys
-d=json.load(sys.stdin).get('data',[])
-for m in d:
-    if m.get('model_name')=='$TARGET':
-        print((m.get('model_info') or {}).get('id','')); break
+  | ROUTER_GROUP="$ROUTER_GROUP" TARGET="$TARGET" python3 -c "
+import json, os, sys
+target = os.environ['TARGET']; group = os.environ['ROUTER_GROUP']
+data = json.load(sys.stdin).get('data', [])
+best = ''
+for m in data:
+    info = m.get('model_info') or {}
+    if info.get('id') == target:
+        # Prefer the group member; that is the one the bandit samples.
+        if m.get('model_name') == group:
+            best = info.get('id', ''); break
+        best = best or info.get('id', '')
+print(best)
 ")"
 
 if [ -z "$MODEL_ID" ]; then

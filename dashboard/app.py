@@ -121,6 +121,7 @@ def snapshot() -> dict:
     tc = GLOBAL_CLASS
     bucket = STATE().arms.get(tc, {})
     total_reqs = sum(a.requests for a in bucket.values()) or 1
+    rolling = STATE().rolling_share()
 
     arms = []
     for name in sorted(bucket, key=lambda n: (PALETTE_ORDER.index(n)
@@ -136,7 +137,11 @@ def snapshot() -> dict:
             # "this arm has actually learned something" is directly readable.
             "observations": a.observations,
             "requests": a.requests,
-            "share": round(a.requests / total_reqs, 4),
+            # Rolling, not cumulative. A lifetime ratio barely moves when an
+            # arm stops being routed to, so the Demo 4 failover would be
+            # invisible in the panel whose job is to show it.
+            "share": round(rolling.get(name, 0.0), 4),
+            "share_cumulative": round(a.requests / total_reqs, 4),
             "avg_latency_ms": round(a.avg_latency_ms, 1),
             "cost_usd": round(a.total_cost_usd, 6),
             "curve": curve(a.alpha, a.beta),
@@ -147,7 +152,9 @@ def snapshot() -> dict:
     # dial is doing its job, and "red is where the traffic goes" is the version
     # that reads from the back of a room in one glance. It also makes Demo 4
     # unmistakable: kill the red model and the red visibly moves.
-    traffic_leader = max(bucket, key=lambda n: bucket[n].requests) if bucket else None
+    traffic_leader = (max(rolling, key=lambda n: rolling[n])
+                      if rolling else
+                      (max(bucket, key=lambda n: bucket[n].requests) if bucket else None))
 
     pol = policy.load()
     return {

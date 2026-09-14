@@ -25,6 +25,11 @@ from typing import Any
 # Global task class, used when stratification is switched off.
 GLOBAL_CLASS = "_all"
 
+# How many recent selections the rolling traffic split covers. At 3 req/s this
+# is about a minute and a half - long enough to be stable on screen, short
+# enough that the Demo 4 re-sort is obvious within seconds.
+ROLLING_WINDOW = int(os.environ.get("ROUTER_ROLLING_WINDOW", "250"))
+
 STATE_PATH = Path(os.environ.get("ROUTER_STATE_PATH", "router/state/posteriors.json"))
 
 
@@ -107,6 +112,14 @@ class RouterState:
     since_decay: int = 0
     started_at: float = field(default_factory=time.time)
     version: int = 1
+    # Rolling window of recent arm selections.
+    #
+    # dashboard-brief.md section 4.2 asks for a ROLLING traffic split and the
+    # distinction is not cosmetic. A cumulative share is a lifetime ratio: it
+    # barely moves when a model stops being routed to, so after the Demo 4 kill
+    # switch the killed arm still showed 63% of traffic. The panel that is
+    # supposed to make the failover visible showed nothing at all.
+    recent: list = field(default_factory=list)
 
     _lock: Any = field(default=None, repr=False, compare=False)
 
@@ -137,6 +150,19 @@ class RouterState:
         a.requests += 1
         a.last_chosen_at = time.time()
         self.total_requests += 1
+        self.recent.append(name)
+        if len(self.recent) > ROLLING_WINDOW:
+            del self.recent[:-ROLLING_WINDOW]
+
+    def rolling_share(self) -> dict[str, float]:
+        """Share of the last ROLLING_WINDOW selections, per arm."""
+        if not self.recent:
+            return {}
+        n = len(self.recent)
+        out: dict[str, float] = {}
+        for name in self.recent:
+            out[name] = out.get(name, 0.0) + 1.0 / n
+        return out
 
     def record_outcome(
         self,
@@ -192,6 +218,7 @@ class RouterState:
         self.counterfactual_spend_usd = 0.0
         self.total_tokens = 0
         self.since_decay = 0
+        self.recent = []
         self.started_at = time.time()
         self.version += 1
 
@@ -206,6 +233,7 @@ class RouterState:
             "counterfactual_spend_usd": self.counterfactual_spend_usd,
             "total_tokens": self.total_tokens,
             "since_decay": self.since_decay,
+            "recent": self.recent[-ROLLING_WINDOW:],
             "arms": {
                 tc: {n: asdict(a) for n, a in bucket.items()}
                 for tc, bucket in self.arms.items()
@@ -221,6 +249,7 @@ class RouterState:
             counterfactual_spend_usd=d.get("counterfactual_spend_usd", 0.0),
             total_tokens=d.get("total_tokens", 0),
             since_decay=d.get("since_decay", 0),
+            recent=list(d.get("recent") or []),
             started_at=d.get("started_at", time.time()),
             version=d.get("version", 1),
         )
