@@ -18,17 +18,13 @@ BUDGET_KEY_ALIAS="${BUDGET_KEY_ALIAS:-demo-budget-key}"
 
 echo "==> resetting demo state against $BASE"
 
-# --- 1. un-pause the killed deployment ---------------------------------------
-if [ -f /tmp/killed_model_id.txt ]; then
-  MODEL_ID="$(cat /tmp/killed_model_id.txt)"
-  NAME="$(cat /tmp/killed_model.txt 2>/dev/null || echo '?')"
-  echo "  - restoring '$NAME' rpm"
-  curl -sS -X POST "$BASE/model/update" \
-    -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
-    -d "{\"model_id\":\"$MODEL_ID\",\"litellm_params\":{\"rpm\":${PRIMARY_RPM:-600}}}" >/dev/null \
-    && rm -f /tmp/killed_model_id.txt /tmp/killed_model.txt
+# --- 1. close the circuit breaker ---------------------------------------------
+STATE_DIR="${ROUTER_STATE_DIR:-router/state}"
+if [ -s "$STATE_DIR/DISABLED" ]; then
+  echo "  - restoring $(tr '\n' ' ' < "$STATE_DIR/DISABLED")"
+  rm -f "$STATE_DIR/DISABLED"
 else
-  echo "  - no paused deployment recorded, skipping"
+  echo "  - no arm is broken out, skipping"
 fi
 
 # --- 2. reset the budget key's spend -----------------------------------------

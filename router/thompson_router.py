@@ -19,6 +19,7 @@ from __future__ import annotations
 import os
 import random
 import time
+from pathlib import Path
 from typing import Any
 
 from router import policy, shadow
@@ -39,6 +40,44 @@ QUALITY_FLOOR = float(os.environ.get("ROUTER_QUALITY_FLOOR", "0.0"))
 PINNED_ARM = os.environ.get("ROUTER_PIN_ARM", "").strip()
 # The model_name of the group the bandit routes within.
 ROUTER_GROUP = os.environ.get("ROUTER_GROUP", "demo-router")
+
+# Circuit breaker: arms listed here are excluded from routing entirely.
+#
+# This is slide 19 point 3 - "deterministic overrides and a circuit breaker" -
+# and it is also the Demo 4 kill switch, because LiteLLM's admin API cannot
+# disable a CONFIG-FILE deployment at runtime:
+#
+#   POST /model/update {"litellm_params":{"rpm":0}}  -> silently does nothing
+#                                                       (rpm reads back as None)
+#   POST /model/delete {"id":"..."}                  -> 400, "not found in db"
+#
+# Config-defined deployments are not in the database, so the management API has
+# no handle on them. Both calls return success-shaped responses and the model
+# keeps taking traffic: measured 68 of the last 75 routing decisions going to a
+# model that had just been "killed", with the error counter correctly at zero.
+#
+# A file is used rather than an env var so the switch can be thrown against a
+# running process from a second terminal, which is the stage requirement.
+DISABLED_FILE = Path(os.environ.get(
+    "ROUTER_DISABLED_PATH",
+    str(Path(os.environ.get("ROUTER_STATE_PATH", "router/state/posteriors.json")).parent
+        / "DISABLED")))
+_disabled_cache: tuple[float, frozenset[str]] = (0.0, frozenset())
+
+
+def disabled_arms() -> frozenset[str]:
+    """Arms currently broken out of the circuit. Re-read at most once a second."""
+    global _disabled_cache
+    now = time.time()
+    if now - _disabled_cache[0] < 1.0:
+        return _disabled_cache[1]
+    try:
+        names = frozenset(
+            n.strip() for n in DISABLED_FILE.read_text().split() if n.strip())
+    except OSError:
+        names = frozenset()
+    _disabled_cache = (now, names)
+    return names
 
 # Cold-start exploration floor.
 #
@@ -175,6 +214,14 @@ class ThompsonRouter(CustomRoutingStrategyBase):
     ) -> dict:
         healthy_list = await self._healthy(model, request_kwargs)
         healthy = {_name(d): d for d in healthy_list if _is_arm(d)}
+
+        # Circuit breaker. LiteLLM's own fallbacks still apply to whatever is
+        # left, so a request never fails because an arm was broken out.
+        broken = disabled_arms()
+        if broken:
+            remaining = {k: v for k, v in healthy.items() if k not in broken}
+            if remaining:
+                healthy = remaining
         if not healthy:
             # No arms left. Hand back whatever LiteLLM has so fallbacks and
             # retries still run rather than raising out of the strategy.

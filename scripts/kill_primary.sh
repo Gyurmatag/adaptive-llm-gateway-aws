@@ -37,34 +37,18 @@ echo "==> killing '$TARGET' on $BASE"
 # a model that had just been "killed", with the error counter correctly at
 # zero and the dashboard looking exactly as if the failover had worked.
 ROUTER_GROUP="${ROUTER_GROUP:-demo-router}"
-MODEL_ID="$(curl -sS -H "Authorization: Bearer $KEY" "$BASE/model/info" \
-  | ROUTER_GROUP="$ROUTER_GROUP" TARGET="$TARGET" python3 -c "
-import json, os, sys
-target = os.environ['TARGET']; group = os.environ['ROUTER_GROUP']
-data = json.load(sys.stdin).get('data', [])
-best = ''
-for m in data:
-    info = m.get('model_info') or {}
-    if info.get('id') == target:
-        # Prefer the group member; that is the one the bandit samples.
-        if m.get('model_name') == group:
-            best = info.get('id', ''); break
-        best = best or info.get('id', '')
-print(best)
-")"
+# Throw the circuit breaker.
+#
+# NOT the admin API: LiteLLM cannot disable a config-file deployment at runtime.
+# POST /model/update with rpm 0 silently does nothing (rpm reads back as None)
+# and POST /model/delete returns 400 "not found in db", because config-defined
+# deployments are not in the database. Both look like they worked and the model
+# keeps serving. See router/thompson_router.py.
+STATE_DIR="${ROUTER_STATE_DIR:-router/state}"
+mkdir -p "$STATE_DIR"
+echo "$TARGET" >> "$STATE_DIR/DISABLED"
+sort -u "$STATE_DIR/DISABLED" -o "$STATE_DIR/DISABLED"
 
-if [ -z "$MODEL_ID" ]; then
-  echo "!! '$TARGET' not found in the live model list" >&2
-  curl -sS -H "Authorization: Bearer $KEY" "$BASE/model/info" \
-    | python3 -c "import json,sys;print('available:',[m.get('model_name') for m in json.load(sys.stdin).get('data',[])])" >&2
-  exit 1
-fi
+echo "==> '$TARGET' broken out of the circuit. Watch the error counter stay at zero."
+echo "    restore with: scripts/reset_demo.sh"
 
-echo "$TARGET" > /tmp/killed_model.txt
-echo "$MODEL_ID" > /tmp/killed_model_id.txt
-
-curl -sS -X POST "$BASE/model/update" \
-  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
-  -d "{\"model_id\":\"$MODEL_ID\",\"litellm_params\":{\"rpm\":0}}" >/dev/null
-
-echo "==> '$TARGET' rpm=0. Watch the error counter stay at zero."
