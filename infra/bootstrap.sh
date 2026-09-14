@@ -176,6 +176,28 @@ else
   warn "config/.env missing - copy config/.env.example first"
 fi
 
+# ------------------------------------------------- 4. ALB idle timeout for SSE
+say "4. ALB idle timeout (streaming completions AND the dashboard SSE stream)"
+ALB_ARN="${ALB_ARN:-}"
+if [ -z "$ALB_ARN" ]; then
+  ALB_ARN="$($AWS elbv2 describe-load-balancers \
+    --query "LoadBalancers[?contains(LoadBalancerName, '${PROJECT}')].LoadBalancerArn | [0]" \
+    --output text 2>/dev/null)"
+fi
+if [ -n "$ALB_ARN" ] && [ "$ALB_ARN" != "None" ]; then
+  IDLE="${ALB_IDLE_TIMEOUT:-120}"
+  if $AWS elbv2 modify-load-balancer-attributes --load-balancer-arn "$ALB_ARN" \
+       --attributes "Key=idle_timeout.timeout_seconds,Value=$IDLE" >/dev/null 2>&1; then
+    ok "ALB idle timeout set to ${IDLE}s"
+    echo "     KEEPALIVE_TIMEOUT in config/config.yaml must stay ABOVE this."
+    echo "     Currently: $(grep -E '^\s*keepalive_timeout' config/config.yaml | tr -d ' ' || echo '?')"
+  else
+    warn "could not set the ALB idle timeout - streaming may be cut mid-flight"
+  fi
+else
+  echo "  skip ALB not deployed yet. Re-run bootstrap.sh after deploy.sh."
+fi
+
 say "summary"
 if [ "$FAIL" -eq 0 ]; then
   echo "  bootstrap OK. Next: infra/upstream/deploy.sh, then scripts/smoke_test.sh"
