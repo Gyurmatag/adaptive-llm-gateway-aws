@@ -3,7 +3,9 @@
 This directory does **not** reimplement the gateway. That would contradict the
 talk's own argument: position 3 on the gradient is a deploy, not a build.
 
-The bulk comes from the official AWS guidance, vendored at `infra/upstream/`:
+The bulk comes from the official AWS guidance, fetched by
+`infra/fetch-upstream.sh` into `infra/upstream/` (fetched, not vendored, so its
+licensing stays its own):
 **aws-solutions-library-samples/guidance-for-multi-provider-generative-ai-gateway-on-aws**
 
 It ships Terraform for ECS or EKS, an ALB, RDS Postgres, ElastiCache, Secrets

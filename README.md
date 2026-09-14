@@ -40,7 +40,7 @@ configured and switchable in `config/config.yaml` as `builtin-adaptive`.
 |---|---|
 | `config/config.yaml` | The model fleet, fallback chains, semantic cache, budgets |
 | `router/` | Thompson sampling strategy, judge-based rewards, policy snapshots, shadow mode |
-| `infra/` | Deployment: the official AWS guidance plus what it does not cover |
+| `infra/` | Deployment: `fetch-upstream.sh` pulls the official AWS guidance, plus what it does not cover |
 | `dashboard/` | FastAPI data plane - `/state`, `/spend`, SSE stream |
 | `dashboard-web/` | Next.js + shadcn live dashboard |
 | `loadgen/` | Async load generator with a mixed prompt pool |
@@ -135,9 +135,11 @@ That sets the budget cap, verifies Bedrock model access per region (and tells
 you which other regions have the models if yours does not), and creates the two
 Intelligent Prompt Router ARNs.
 
-Then deploy the gateway from the official AWS guidance:
+Then fetch and run the official AWS guidance. It is fetched rather than
+vendored, so its licensing and provenance stay its own:
 
 ```bash
+./infra/fetch-upstream.sh
 cd infra/upstream && ./deploy.sh
 ```
 
