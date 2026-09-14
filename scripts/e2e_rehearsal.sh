@@ -70,7 +70,7 @@ for M in ${DEMO1_MODELS:-claude-sonnet gpt-on-bedrock nova-lite}; do
   B=$(date +%s.%N)
   R=$(curl -sS -X POST "$BASE/v1/chat/completions" \
       -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
-      -d "{\"model\":\"$M\",\"messages\":[{\"role\":\"user\",\"content\":\"What is the capital of Hungary?\"}],\"max_tokens\":60}" 2>/dev/null)
+      -d "{\"model\":\"$M\",\"messages\":[{\"role\":\"user\",\"content\":\"What is the capital of Hungary?\"}],\"max_tokens\":60,\"cache\":{\"no-cache\":true}}" 2>/dev/null)
   D=$(echo "$(date +%s.%N) - $B" | bc)
   WHO=$(printf '%s' "$R" | $PY -c "import json,sys;print(json.load(sys.stdin).get('model','?'))" 2>/dev/null || echo "?")
   TXT=$(printf '%s' "$R" | $PY -c "import json,sys;print((json.load(sys.stdin)['choices'][0]['message']['content'] or '')[:90].replace(chr(10),' '))" 2>/dev/null || echo "?")
@@ -81,14 +81,17 @@ log ""
 
 # ------------------------------------------------------------- beat 4 demo 2
 log "## Beat 4 - Demo 2: semantic cache on a reworded question"
-Q1="Explain in two sentences why connection pooling reduces database latency."
-Q2="In two sentences, why does pooling connections cut latency to a database?"
+# Deliberately off-topic relative to loadgen/prompts.yaml. The load generator
+# has been seeding the semantic cache since beat 2, so a question resembling
+# anything in that pool is already warm and the beat shows 19ms vs 19ms.
+Q1="Describe in two sentences how a sourdough starter develops its sour flavour."
+Q2="In two sentences, what makes a sourdough starter turn sour?"
 SPEND_BEFORE=$(curl -sS "$DASH/spend" 2>/dev/null | $PY -c "import json,sys;print(json.load(sys.stdin)['actual_usd'])" 2>/dev/null || echo 0)
 
 B=$(date +%s.%N)
 curl -sS -D /tmp/h1.txt -X POST "$BASE/v1/chat/completions" \
   -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
-  -d "{\"model\":\"nova-lite\",\"messages\":[{\"role\":\"user\",\"content\":\"$Q1\"}],\"max_tokens\":120}" -o /tmp/r1.json 2>/dev/null
+  -d "{\"model\":\"nova-lite\",\"messages\":[{\"role\":\"user\",\"content\":\"$Q1\"}],\"max_tokens\":120,\"cache\":{\"no-cache\":true}}" -o /tmp/r1.json 2>/dev/null
 D1=$(echo "($(date +%s.%N) - $B)*1000" | bc)
 
 B=$(date +%s.%N)

@@ -11,7 +11,6 @@ easy:
   prompts:
     - "What is the capital of Hungary?"
     - "Convert 450 kilometres to miles."
-    - "List three benefits of connection pooling in one sentence each."
     - "What does the acronym SLA stand for?"
     - "Give me a one-sentence definition of idempotency."
     - "What year was the Apollo 11 moon landing?"
@@ -36,3 +35,9 @@ hard:
     - "An ALB terminates streaming HTTP responses at 60 seconds while the backend keeps writing. Explain the interaction and how you would configure both sides."
     - "Design the reward signal for a router choosing between three LLMs when you have no human feedback. Name the failure modes of your design."
     - "Explain the difference between a prompt cache and a response cache for LLM serving, including where each sits relative to the routing decision."
+
+# NOTE: nothing in this pool may be semantically close to the Demo 2 question
+# in scripts/e2e_rehearsal.sh. The load generator starts at stage minute 2 and
+# seeds the semantic cache continuously, so a Demo 2 question that resembles a
+# pool entry is already cached by the time it is asked - and the whole beat is
+# the contrast between a cold first ask and a warm reworded one.
