@@ -28,6 +28,26 @@ export function Dashboard() {
   useEffect(() => {
     let cancelled = false;
 
+    // ?snapshot=1 fetches once and opens no stream.
+    //
+    // A headless screenshot never completes while an EventSource is open - the
+    // page has no idle moment - so capturing dashboard images for the deck
+    // would hang forever. This also gives a stable frame to photograph rather
+    // than one that ticks while the shutter is open.
+    if (typeof window !== "undefined" &&
+        new URLSearchParams(window.location.search).get("snapshot")) {
+      Promise.all([
+        fetch(`${DATA_PLANE}/state`).then((r) => r.json()),
+        fetch(`${DATA_PLANE}/spend`).then((r) => r.json()),
+      ])
+        .then(([state, spend]) => {
+          setPayload({ state, spend });
+          setStatus("live");
+        })
+        .catch(() => setStatus("reconnecting"));
+      return;
+    }
+
     const connect = () => {
       if (cancelled) return;
       esRef.current?.close();
