@@ -50,6 +50,8 @@ export function BetaCurves({
   const sy = (y: number) =>
     H - PAD.bottom - (y / yMax) * (H - PAD.top - PAD.bottom);
 
+  let labelRow = new Map<string, number>();
+
   const ticks = 5;
   const tickVals = Array.from(
     { length: ticks },
@@ -96,6 +98,24 @@ export function BetaCurves({
         </g>
       ))}
 
+      {(() => {
+        // Direct labels collide when two peaks sit close together - three
+        // models near the same mean rendered as "GP-IPRnova-et" on the
+        // projector check. Stagger colliding labels onto separate rows rather
+        // than letting them overlap; a legend box would break the rule that
+        // identity is never colour alone.
+        const placed: { x: number; row: number }[] = [];
+        labelRow = new Map<string, number>();
+        for (const a of drawable) {
+          const peak = a.curve.reduce((m, p) => (p[1] > m[1] ? p : m), a.curve[0]);
+          const x = Math.min(Math.max(sx(peak[0]), 120), W - 120);
+          let row = 0;
+          while (placed.some((q) => q.row === row && Math.abs(q.x - x) < 190)) row++;
+          placed.push({ x, row });
+          labelRow.set(a.model, row);
+        }
+        return null;
+      })()}
       {drawable.map((a) => {
         const c = colorFor(a.model, leader);
         const isLeader = a.model === leader;
@@ -132,7 +152,7 @@ export function BetaCurves({
               // Keep the direct label fully inside the plot. A half-clipped
               // model name is worse than a nudged one.
               x={Math.min(Math.max(sx(peak[0]), 120), W - 120)}
-              y={Math.max(sy(peak[1]) - 14, 22)}
+              y={Math.max(sy(peak[1]) - 14, 22) + (labelRow.get(a.model) ?? 0) * 34}
               textAnchor="middle"
               fontSize={isLeader ? 30 : 24}
               fontWeight={isLeader ? 800 : 600}

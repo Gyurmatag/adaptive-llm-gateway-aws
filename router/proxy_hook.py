@@ -231,9 +231,38 @@ class ThompsonInstaller(CustomLogger):
             answer = ""
 
         tokens, cost = rewards._usage(response)
+        # litellm.completion_cost() returns 0 for any deployment whose pricing
+        # it cannot look up in its own model cost map - which is every custom
+        # or proxied model. The visible symptom is a savings counter reading
+        # "$0.00 actual / 100% saved", i.e. a fabricated headline number on the
+        # largest element on screen. Price it from the configured per-token
+        # costs instead, which are declared per arm in config.yaml anyway.
+        if not cost:
+            cost = self._price(response, arm)
         tc = rewards.task_class_of(messages)
         rewards.spawn(rewards.score_and_update(
             arm, question, answer, latency_ms, cost, tokens, tc))
+
+    def _price(self, response, arm: str) -> float:
+        """Cost from the arm's configured per-token prices."""
+        router = getattr(self.strategy, "llm_router", None)
+        if router is None:
+            return 0.0
+        info = {}
+        for d in (router.model_list or []):
+            if ((d.get("model_info") or {}).get("id")) == arm:
+                info = d.get("model_info") or {}
+                break
+        if not info:
+            return 0.0
+        try:
+            usage = response.usage
+            pt = int(getattr(usage, "prompt_tokens", 0) or 0)
+            ct = int(getattr(usage, "completion_tokens", 0) or 0)
+        except (AttributeError, TypeError, ValueError):
+            return 0.0
+        return (pt * float(info.get("input_cost_per_token") or 0.0)
+                + ct * float(info.get("output_cost_per_token") or 0.0))
 
     @staticmethod
     def _arm_of(response, kwargs) -> str:
