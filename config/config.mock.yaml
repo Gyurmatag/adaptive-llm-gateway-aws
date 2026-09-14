@@ -44,6 +44,14 @@ model_list:
       input_cost_per_token: 0.00000006
       output_cost_per_token: 0.00000024
 
+  - model_name: embed
+    litellm_params:
+      model: openai/mock-embed
+      api_base: http://host.docker.internal:9100/v1
+      api_key: mock
+    model_info:
+      arm: false
+
   - model_name: judge
     litellm_params:
       model: openai/mock-judge
@@ -122,6 +130,27 @@ router_settings:
   cooldown_time: 30
 
 litellm_settings:
+  # Gateway response cache, in FRONT of routing: a hit means no model call at
+  # all, no tokens, no routing decision. Demo 2.
+  cache: true
+  cache_params:
+    type: redis-semantic
+    # redis_url, NOT host/port. The redis-semantic backend goes through redisvl
+    # and raises at startup with "Missing required Redis configuration:
+    # REDIS_PASSWORD. Provide REDIS_PASSWORD or redis_url." if given host/port
+    # with no password - which takes the whole gateway down, not just the cache.
+    redis_url: redis://valkey:6379
+    # 0.70 here, not the 0.85 the real config uses: the mock embedding is a
+    # crude bag-of-words stem vector and scores a genuine paraphrase at ~0.76.
+    # Real embeddings handle paraphrase far better and take a higher bar.
+    similarity_threshold: 0.70
+    ttl: 900
+    # A PROVIDER-QUALIFIED model string, not a model_list entry name. The
+    # semantic cache calls litellm.embedding() directly rather than going
+    # through the Router, so a group name fails with "LLM Provider NOT
+    # provided" - and that failure takes the whole gateway down at startup.
+    redis_semantic_cache_embedding_model: openai/mock-embed
+
   # proxy_hook installs the Thompson strategy onto the proxy's Router at
   # startup; rewards feed the posteriors from the success/failure callbacks.
   callbacks: ["router.proxy_hook.instance"]

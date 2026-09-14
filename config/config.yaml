@@ -98,6 +98,15 @@ model_list:
         quality_tier: 1
         strengths: ["factual_lookup"]
 
+  # ------------------------------------------------------- semantic cache embed
+  # Backs the semantic cache only. Not a bandit arm, not a chat model.
+  - model_name: embed
+    litellm_params:
+      model: bedrock/os.environ/MODEL_EMBED
+      aws_region_name: os.environ/AWS_REGION
+    model_info:
+      arm: false
+
   # ----------------------------------------------------------------- the judge
   # Excluded from routing (`arm: false`). Scores a sampled fraction of answers
   # asynchronously and that score is the reward that moves the posteriors.
@@ -221,14 +230,26 @@ litellm_settings:
   # at all, no tokens, no routing decision. Slide 14.
   cache: true
   cache_params:
-    # valkey-search talks to Valkey over the Redis protocol, so semantic
-    # caching works on ElastiCache for Valkey with no RediSearch or Qdrant.
-    type: valkey-semantic
-    host: os.environ/REDIS_HOST
-    port: os.environ/REDIS_PORT
+    # `redis-semantic`, NOT `valkey-semantic`: the latter is not a cache type
+    # this LiteLLM build accepts (valid: local, redis, redis-semantic, s3,
+    # disk, qdrant-semantic, azure-blob, gcs). It talks the RediSearch command
+    # set via redisvl, which ElastiCache for Valkey serves when the
+    # valkey-search module is enabled on the engine version.
+    type: redis-semantic
+    # redis_url, NOT host/port: the redis-semantic backend raises at startup
+    # with "Missing required Redis configuration: REDIS_PASSWORD" otherwise,
+    # and that failure takes the whole gateway down. See infra/DEPLOY.md.
+    redis_url: os.environ/REDIS_URL
     similarity_threshold: 0.85
     ttl: 900
-    redis_semantic_cache_embedding_model: judge
+    # An EMBEDDING model, not a chat model. Pointing this at the judge looks
+    # plausible and fails at runtime - the semantic cache silently never hits,
+    # which on stage looks exactly like "the cache demo did not work".
+    # A PROVIDER-QUALIFIED model string, not a model_list entry name: the
+    # semantic cache calls litellm.embedding() directly, not through the
+    # Router, so a group name fails with "LLM Provider NOT provided" and the
+    # gateway does not start. Must also be an EMBEDDING model, not a chat one.
+    redis_semantic_cache_embedding_model: bedrock/amazon.titan-embed-text-v2:0
     # Isolate cache buckets per end user so one attendee's question cannot
     # serve another's. Also stops a demo reset from being polluted.
     semantic_cache_scope: end_user

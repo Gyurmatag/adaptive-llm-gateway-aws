@@ -18,14 +18,19 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
+import math
 import random
+import re
 import time
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 app = FastAPI(title="mock provider")
+
+_EMBED_DIM = 256
 
 # model -> (P(good answer), mean latency ms, jitter ms)
 PROFILES = {
@@ -45,6 +50,41 @@ def profile(model: str):
         if k in model:
             return v
     return (0.85, 400, 120)
+
+
+@app.post("/v1/embeddings")
+async def embeddings(req: Request):
+    """Deterministic bag-of-words embedding.
+
+    Real enough for the semantic cache to be exercised offline: two sentences
+    that share most of their words land close together in cosine distance, and
+    unrelated sentences do not. That is all the cache needs to be verified,
+    and it means Demo 2 can be rehearsed without a cloud embedding model.
+    """
+    body = await req.json()
+    inputs = body.get("input")
+    if isinstance(inputs, str):
+        inputs = [inputs]
+
+    def embed(text: str) -> list[float]:
+        vec = [0.0] * _EMBED_DIM
+        words = re.findall(r"[a-z0-9]+", text.lower())
+        for w in words:
+            # Stem crudely so "pooling"/"pool" and "reduces"/"reduce" collide,
+            # which is what makes a reworded question actually match.
+            stem = w[:6]
+            vec[int(hashlib.md5(stem.encode()).hexdigest(), 16) % _EMBED_DIM] += 1.0
+        norm = math.sqrt(sum(v * v for v in vec)) or 1.0
+        return [v / norm for v in vec]
+
+    return JSONResponse({
+        "object": "list",
+        "model": body.get("model", "mock-embed"),
+        "data": [{"object": "embedding", "index": i, "embedding": embed(t)}
+                 for i, t in enumerate(inputs or [])],
+        "usage": {"prompt_tokens": sum(len(t) // 4 for t in (inputs or [])),
+                  "total_tokens": sum(len(t) // 4 for t in (inputs or []))},
+    })
 
 
 @app.get("/v1/models")

@@ -42,6 +42,9 @@ from router.thompson_router import ThompsonRouter
 _INSTALL_TIMEOUT_S = float(os.environ.get("ROUTER_INSTALL_TIMEOUT", "120"))
 # Must be well under the gap between the kill switch and the audience noticing.
 _WATCH_INTERVAL_S = float(os.environ.get("ROUTER_WATCH_INTERVAL", "2.0"))
+# The model_name of the group the bandit routes within. Only this group's
+# traffic moves the posteriors.
+ROUTER_GROUP = os.environ.get("ROUTER_GROUP", "demo-router")
 
 
 class ThompsonInstaller(CustomLogger):
@@ -170,7 +173,14 @@ class ThompsonInstaller(CustomLogger):
                 # iterator, so they contribute cost but no quality signal.
                 if kwargs.get("stream"):
                     return response
-                if kwargs.get("model") == os.environ.get("JUDGE_MODEL_NAME", "judge"):
+                # Only learn from traffic the bandit actually routed.
+                #
+                # Demo 1 addresses deployments directly by name ("same curl,
+                # three model strings"). Those requests bypass the router, and
+                # LiteLLM assigns them auto-generated uuid deployment ids - so
+                # observing them created junk arms named after 64-char hashes
+                # and drew meaningless curves on the dashboard.
+                if kwargs.get("model") != ROUTER_GROUP:
                     return response
                 self._observe(kwargs, response,
                               (time.perf_counter() - start) * 1000.0)

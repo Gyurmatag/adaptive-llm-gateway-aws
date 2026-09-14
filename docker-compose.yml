@@ -18,13 +18,18 @@ services:
       retries: 12
 
   valkey:
-    # Valkey rather than Redis so the local semantic cache backend matches
-    # ElastiCache for Valkey in the deployed stack. Same protocol, same
-    # valkey-semantic cache type, so config.yaml does not fork.
-    image: valkey/valkey:8-alpine
+    # valkey-extensions, NOT plain valkey. LiteLLM's `redis-semantic` cache
+    # goes through redisvl, which needs the RediSearch command set; plain
+    # Valkey does not ship it and the cache then fails to initialise silently
+    # (GET /cache/flushall returns 503 and nothing else says why).
+    #
+    # The deployed equivalent is ElastiCache for Valkey WITH the valkey-search
+    # module enabled - the engine-version question is a real deploy gate, not a
+    # detail. See infra/DEPLOY.md.
+    image: redis/redis-stack-server:7.4.0-v3
     ports: ["6379:6379"]
     healthcheck:
-      test: ["CMD", "valkey-cli", "ping"]
+      test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 12
@@ -40,6 +45,12 @@ services:
       DATABASE_URL: postgresql://litellm:${POSTGRES_PASSWORD:-litellm-local}@postgres:5432/litellm
       REDIS_HOST: valkey
       REDIS_PORT: "6379"
+      REDIS_URL: redis://valkey:6379
+      # The semantic cache's embedding call goes through litellm directly, so
+      # it needs provider credentials in the environment rather than a
+      # model_list entry. Only used by the mock stack.
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-mock}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-http://host.docker.internal:9100/v1}
       AWS_REGION: ${AWS_REGION:-eu-central-1}
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
