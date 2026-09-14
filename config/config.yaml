@@ -1,0 +1,199 @@
+# LiteLLM gateway config - AWS Community Day CEE 2026
+#
+# Everything routes through Bedrock so a single credential (the ECS task role)
+# covers the whole fleet. See section 6.3 of the talk plan.
+#
+# IMPORTANT: the plain `bedrock/` route does not parse ARNs. Application
+# inference profile ARNs and Intelligent Prompt Router ARNs must go through
+# `bedrock/converse/`. This is the highest-risk integration point in the build
+# and `scripts/smoke_test.sh` checks it first.
+#
+# Model IDs below are defaults. `infra/bootstrap.sh` verifies every one of them
+# against the live account and fails loudly rather than letting a wrong ID
+# surface as a routing error on stage.
+
+model_list:
+
+  # ---------------------------------------------------------------- bandit arms
+  # These six deployments are the candidate pool the router samples over.
+  # `model_info.arm` marks a deployment as a bandit arm; the judge is excluded.
+
+  # Bedrock Intelligent Prompt Routing - Claude pair (Haiku / Sonnet).
+  # The ARN comes from `aws bedrock create-prompt-router`, run by bootstrap.sh,
+  # and is injected as an env var rather than committed. Motif marker: buy.
+  - model_name: ipr-claude
+    litellm_params:
+      model: bedrock/converse/os.environ/IPR_CLAUDE_ARN
+      aws_region_name: os.environ/AWS_REGION
+    model_info:
+      arm: true
+      family: anthropic
+      tier: managed-router
+      input_cost_per_token: 0.000001
+      output_cost_per_token: 0.000005
+      adaptive_router_preferences:
+        quality_tier: 3
+        strengths: ["analytical_reasoning", "summarization"]
+
+  # Bedrock Intelligent Prompt Routing - Nova pair (Lite / Pro).
+  - model_name: ipr-nova
+    litellm_params:
+      model: bedrock/converse/os.environ/IPR_NOVA_ARN
+      aws_region_name: os.environ/AWS_REGION
+    model_info:
+      arm: true
+      family: nova
+      tier: managed-router
+      input_cost_per_token: 0.00000035
+      output_cost_per_token: 0.0000014
+      adaptive_router_preferences:
+        quality_tier: 2
+        strengths: ["factual_lookup", "summarization"]
+
+  # Direct Claude Sonnet - the quality anchor and the demo's primary.
+  # kill_primary.sh zeroes this deployment's rpm for Demo 4.
+  - model_name: claude-sonnet
+    litellm_params:
+      model: bedrock/converse/os.environ/MODEL_CLAUDE_SONNET
+      aws_region_name: os.environ/AWS_REGION
+    model_info:
+      arm: true
+      family: anthropic
+      tier: premium
+      input_cost_per_token: 0.000003
+      output_cost_per_token: 0.000015
+      adaptive_router_preferences:
+        quality_tier: 4
+        strengths: ["code_generation", "analytical_reasoning"]
+
+  # A GPT model served by Bedrock. This is the slide 9 proof point: OpenAI
+  # models run inside your own AWS account, no third party in the request path.
+  - model_name: gpt-on-bedrock
+    litellm_params:
+      model: bedrock/converse/os.environ/MODEL_GPT
+      aws_region_name: os.environ/AWS_REGION
+    model_info:
+      arm: true
+      family: openai
+      tier: premium
+      input_cost_per_token: 0.00000125
+      output_cost_per_token: 0.00001
+      adaptive_router_preferences:
+        quality_tier: 4
+        strengths: ["code_generation", "creative_writing"]
+
+  # The cheap arm. The bandit should discover on its own that this is good
+  # enough for most of the mixed prompt pool, which is the whole demo.
+  - model_name: nova-lite
+    litellm_params:
+      model: bedrock/converse/os.environ/MODEL_NOVA_LITE
+      aws_region_name: os.environ/AWS_REGION
+    model_info:
+      arm: true
+      family: nova
+      tier: cheap
+      input_cost_per_token: 0.00000006
+      output_cost_per_token: 0.00000024
+      adaptive_router_preferences:
+        quality_tier: 1
+        strengths: ["factual_lookup"]
+
+  # ----------------------------------------------------------------- the judge
+  # Excluded from routing (`arm: false`). Scores a sampled fraction of answers
+  # asynchronously and that score is the reward that moves the posteriors.
+  # This is the component branch B exists for - see handoff/branch-decision.md.
+  - model_name: judge
+    litellm_params:
+      model: bedrock/converse/os.environ/MODEL_JUDGE
+      aws_region_name: os.environ/AWS_REGION
+    model_info:
+      arm: false
+      family: nova
+      tier: judge
+      input_cost_per_token: 0.000000035
+      output_cost_per_token: 0.00000014
+
+  # -------------------------------------------------- built-in adaptive router
+  # Shipped so slide 16's "show it being switched on" is a live switch rather
+  # than a screenshot. Configured from proxy YAML - see branch-decision.md Q1,
+  # which corrects the stale "SDK-only" claim in the brief.
+  #
+  # Do NOT enable routing plugins alongside this: `adaptive: true` with plugins
+  # raises at config validation.
+  - model_name: builtin-adaptive
+    litellm_params:
+      model: auto_router/adaptive_router
+    adaptive_router_config:
+      available_models: ["claude-sonnet", "gpt-on-bedrock", "nova-lite", "ipr-nova"]
+      weights:
+        quality: 0.7
+        cost: 0.3
+      session_affinity: true
+      session_affinity_ttl_seconds: 3600
+
+# ------------------------------------------------------------------ router cfg
+router_settings:
+  # Branch B: the custom Thompson sampling strategy. Swap to any classic
+  # strategy name to compare, or point requests at `builtin-adaptive` above.
+  routing_strategy: custom
+  custom_routing_strategy: router.thompson_router.ThompsonRouter
+
+  # Every primary has a cross-family successor. Demo 4 exercises this: when
+  # claude-sonnet is killed, traffic must land on a different family and the
+  # error counter must stay at zero.
+  fallbacks:
+    - claude-sonnet:   ["gpt-on-bedrock", "ipr-nova", "nova-lite"]
+    - gpt-on-bedrock:  ["claude-sonnet", "ipr-claude", "nova-lite"]
+    - ipr-claude:      ["ipr-nova", "claude-sonnet", "nova-lite"]
+    - ipr-nova:        ["nova-lite", "ipr-claude", "claude-sonnet"]
+    - nova-lite:       ["ipr-nova", "gpt-on-bedrock", "claude-sonnet"]
+
+  num_retries: 3
+  retry_after: 2
+  allowed_fails: 3
+  cooldown_time: 30
+  timeout: 45
+
+  redis_host: os.environ/REDIS_HOST
+  redis_port: os.environ/REDIS_PORT
+
+# ---------------------------------------------------------------- litellm cfg
+litellm_settings:
+  # Gateway response cache. Sits in FRONT of routing: a hit means no model call
+  # at all, no tokens, no routing decision. Slide 14.
+  cache: true
+  cache_params:
+    # valkey-search talks to Valkey over the Redis protocol, so semantic
+    # caching works on ElastiCache for Valkey with no RediSearch or Qdrant.
+    type: valkey-semantic
+    host: os.environ/REDIS_HOST
+    port: os.environ/REDIS_PORT
+    similarity_threshold: 0.85
+    ttl: 900
+    redis_semantic_cache_embedding_model: judge
+    # Isolate cache buckets per end user so one attendee's question cannot
+    # serve another's. Also stops a demo reset from being polluted.
+    semantic_cache_scope: end_user
+
+  success_callback: ["router.rewards.on_success"]
+  failure_callback: ["router.rewards.on_failure"]
+
+  # Never log prompt/response bodies. The demo account is throwaway but the
+  # repo is public and the habit matters more than this deployment.
+  turn_off_message_logging: true
+  drop_params: true
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/DATABASE_URL
+
+  # LiteLLM warns to keep this ABOVE the ALB idle timeout or streaming
+  # responses get cut mid-flight. The ALB idle timeout is set in
+  # infra/terraform/main.tf and these two numbers are a matched pair -
+  # see infra/DEPLOY.md.
+  keepalive_timeout: 130
+
+  # Autoscaling signal. CPU lags LLM traffic badly: a task streaming forty
+  # responses is mostly waiting on providers, so CPU reads low while capacity
+  # is gone. Scale on tokens/sec instead.
+  store_model_in_db: true
