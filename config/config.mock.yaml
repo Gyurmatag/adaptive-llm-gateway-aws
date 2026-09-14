@@ -140,10 +140,17 @@ litellm_settings:
     # REDIS_PASSWORD. Provide REDIS_PASSWORD or redis_url." if given host/port
     # with no password - which takes the whole gateway down, not just the cache.
     redis_url: redis://valkey:6379
-    # 0.70 here, not the 0.85 the real config uses: the mock embedding is a
-    # crude bag-of-words stem vector and scores a genuine paraphrase at ~0.76.
-    # Real embeddings handle paraphrase far better and take a higher bar.
-    similarity_threshold: 0.70
+    # 0.60 here, NOT the 0.85 the real config uses.
+    #
+    # The mock embedding is a crude bag-of-words stem vector, so it scores a
+    # genuine paraphrase far lower than a real embedding model would: the Demo
+    # 2 pair scores 0.69 here and would score well above 0.9 on Titan. Keeping
+    # the real threshold locally would mean the beat only "works" with a pair
+    # so lexically identical it is not really a rewording.
+    #
+    # Safe at 0.60 because unrelated prompts score ~0.0 on this embedding, and
+    # the load generator sends cache.no-cache on most of its traffic anyway.
+    similarity_threshold: 0.60
     ttl: 900
     # A PROVIDER-QUALIFIED model string, not a model_list entry name. The
     # semantic cache calls litellm.embedding() directly rather than going

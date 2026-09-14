@@ -50,9 +50,35 @@ else
 fi
 
 # --- 3. flush the semantic cache ---------------------------------------------
-echo "  - flushing the semantic cache (must be cold for Demo 2)"
-curl -sS -X POST "$BASE/cache/flushall" -H "Authorization: Bearer $KEY" >/dev/null 2>&1 \
-  || echo "    (no cache endpoint; flush Valkey directly if Demo 2 misbehaves)"
+echo "  - clearing the semantic cache (must be cold for Demo 2)"
+# Delete the cache ENTRIES, never FLUSHALL.
+#
+# FLUSHALL destroys the redisvl vector index along with the data, and LiteLLM's
+# cache client does not notice or recreate it. Writes then keep succeeding into
+# unindexed hashes and every lookup silently returns nothing - Demo 2 shows
+# "x-litellm-semantic-similarity: 0.0" and no speedup, with no error anywhere.
+# The index only comes back when the gateway restarts.
+#
+# Deleting by key prefix leaves the index definition in place.
+CACHE_PREFIX="${SEMANTIC_CACHE_PREFIX:-litellm_semantic_cache_index:}"
+CLEARED=""
+if [ -n "$(docker compose ps -q valkey 2>/dev/null)" ]; then
+  N=$(docker compose exec -T valkey sh -c \
+    "redis-cli --scan --pattern '${CACHE_PREFIX}*' | xargs -r redis-cli DEL 2>/dev/null | awk '{s+=\$1} END {print s+0}'" 2>/dev/null | tr -d '\r')
+  IDX=$(docker compose exec -T valkey redis-cli FT._LIST 2>/dev/null | tr -d '\r' | head -1)
+  if [ -n "$IDX" ]; then
+    CLEARED="yes"
+    echo "    cleared ${N:-0} cache entries, index '$IDX' intact"
+  else
+    echo "    !! the search index is GONE. Demo 2 cannot hit until the gateway" >&2
+    echo "       restarts: docker compose up -d --force-recreate gateway" >&2
+  fi
+fi
+if [ -z "$CLEARED" ]; then
+  curl -sS -X POST "$BASE/cache/flushall" -H "Authorization: Bearer $KEY" >/dev/null 2>&1 \
+    && echo "    called /cache/flushall - VERIFY Demo 2's first ask is slow" \
+    || echo "    !! could not clear the cache; Demo 2 will show a warm first ask" >&2
+fi
 
 # --- 4. router state ----------------------------------------------------------
 # The posteriors live in the GATEWAY process's memory. Deleting the state file
