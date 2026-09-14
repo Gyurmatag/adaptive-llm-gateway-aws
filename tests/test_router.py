@@ -38,12 +38,17 @@ class FakeRouter(ThompsonRouter):
         return self._deps
 
 
+# Must match ROUTER_GROUP: the strategy only registers arms for its own group,
+# so a different name exercises the direct-addressing path instead.
+GROUP = "demo-router"
+
+
 def _pick(router, n=300, **kw):
     async def go():
         out = {}
         for _ in range(n):
             d = await router.async_get_available_deployment(
-                "demo", messages=[{"content": "hello"}], **kw)
+                GROUP, messages=[{"content": "hello"}], **kw)
             out[d["model_name"]] = out.get(d["model_name"], 0) + 1
         return out
     return asyncio.run(go())
@@ -64,6 +69,21 @@ def test_failover_is_total_and_lossless():
     picks = _pick(FakeRouter(alive), n=200)
     assert "cheap" not in picks
     assert sum(picks.values()) == 200
+
+
+def test_direct_addressing_bypasses_the_bandit():
+    """Demo 1 addresses deployments by name; those must not become arms."""
+    from router.state import STATE
+
+    before = {tc: set(b) for tc, b in STATE.arms.items()}
+
+    async def go():
+        return await FakeRouter(DEPS).async_get_available_deployment(
+            "premium", messages=[{"content": "hello"}])
+
+    asyncio.run(go())
+    after = {tc: set(b) for tc, b in STATE.arms.items()}
+    assert after == before, "direct addressing must not register new arms"
 
 
 def test_session_affinity_pins_one_arm():

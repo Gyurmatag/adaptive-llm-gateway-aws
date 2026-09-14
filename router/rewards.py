@@ -157,6 +157,20 @@ async def judge_score(question: str, answer: str) -> float | None:
                 question=question[:2000], answer=answer[:2000])}],
             max_tokens=32,
             temperature=0.0,
+            # THE JUDGE MUST NEVER BE CACHED.
+            #
+            # Judge prompts share a long fixed template and differ only in the
+            # embedded question and answer, so they embed extremely close
+            # together and the semantic cache matches them against each other.
+            # The observed effect: every single judgement returned the SAME
+            # score (0.63) for 404 consecutive rewards, every arm was marked a
+            # failure because 0.63 sat under the 0.7 threshold, and all four
+            # posteriors collapsed to a mean of 0.012 while the dashboard
+            # looked perfectly healthy.
+            #
+            # A cached judge is worse than no judge: it is a constant reward
+            # signal wearing the costume of a real one.
+            caching=False,
         )
         return _extract_score(resp.choices[0].message.content or "")
     except Exception as e:  # noqa: BLE001

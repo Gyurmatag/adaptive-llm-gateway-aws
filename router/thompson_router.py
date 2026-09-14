@@ -37,6 +37,8 @@ SESSION_TTL = int(os.environ.get("ROUTER_SESSION_TTL", "3600"))
 SESSION_AFFINITY = os.environ.get("ROUTER_SESSION_AFFINITY", "true").lower() == "true"
 QUALITY_FLOOR = float(os.environ.get("ROUTER_QUALITY_FLOOR", "0.0"))
 PINNED_ARM = os.environ.get("ROUTER_PIN_ARM", "").strip()
+# The model_name of the group the bandit routes within.
+ROUTER_GROUP = os.environ.get("ROUTER_GROUP", "demo-router")
 
 # Cold-start exploration floor.
 #
@@ -166,6 +168,13 @@ class ThompsonRouter(CustomRoutingStrategyBase):
             # No arms left. Hand back whatever LiteLLM has so fallbacks and
             # retries still run rather than raising out of the strategy.
             return healthy_list[0] if healthy_list else {}
+
+        # Only the bandit's own group registers arms. Demo 1 addresses
+        # deployments directly by name, and LiteLLM still calls the strategy
+        # for those - which created posteriors keyed by auto-generated uuids
+        # and drew permanent flat curves labelled with 64-char hashes.
+        if model != ROUTER_GROUP:
+            return next(iter(healthy.values()))
 
         task_class = task_class_of(messages)
         STATE.ensure_arms(list(healthy), task_class)

@@ -55,7 +55,7 @@ class Stats:
 
 
 async def one(client: httpx.AsyncClient, prompt: str, stats: Stats,
-              session_id: str | None) -> None:
+              session_id: str | None, allow_cache: bool = True) -> None:
     stats.sent += 1
     t0 = time.perf_counter()
     headers = {"Authorization": f"Bearer {API_KEY}"}
@@ -66,6 +66,17 @@ async def one(client: httpx.AsyncClient, prompt: str, stats: Stats,
     }
     if session_id:
         body["metadata"] = {"session_id": session_id}
+    if not allow_cache:
+        # Explicit bypass rather than mangling the prompt.
+        #
+        # The pool is 23 prompts. Sent verbatim they all hit the semantic cache
+        # after the first pass - no model call, no routing decision, no reward -
+        # so the bandit starves while the dashboard shows healthy traffic.
+        # Perturbing the text does not fix it either: a suffix is MORE similar
+        # to the original than a genuine paraphrase is, so any threshold loose
+        # enough for Demo 2 to hit is loose enough for the perturbed prompt to
+        # hit too. Saying "do not cache this one" is the honest control.
+        body["cache"] = {"no-cache": True}
     try:
         r = await client.post("/v1/chat/completions", json=body, headers=headers)
         dt = (time.perf_counter() - t0) * 1000
@@ -110,6 +121,11 @@ async def main() -> int:
                     help="if >0, spread traffic over N session ids to exercise affinity")
     ap.add_argument("--prompts", type=Path,
                     default=Path(__file__).parent / "prompts.yaml")
+    ap.add_argument("--cache-hit-rate", type=float,
+                    default=float(os.environ.get("LOADGEN_CACHE_HIT_RATE", "0.15")),
+                    help="fraction of requests allowed to use the response "
+                         "cache. The rest send cache.no-cache so the bandit "
+                         "sees real model calls.")
     ap.add_argument("--quiet", action="store_true")
     args = ap.parse_args()
 
@@ -135,9 +151,11 @@ async def main() -> int:
             prompt = random.choices(prompts, weights=weights, k=1)[0]
             sid = f"sess-{random.randint(1, args.sessions)}" if args.sessions else None
 
-            async def guarded(p=prompt, s=sid):
+            allow_cache = random.random() < args.cache_hit_rate
+
+            async def guarded(p=prompt, s=sid, c=allow_cache):
                 async with sem:
-                    await one(client, p, stats, s)
+                    await one(client, p, stats, s, allow_cache=c)
 
             t = asyncio.create_task(guarded())
             tasks.add(t)
