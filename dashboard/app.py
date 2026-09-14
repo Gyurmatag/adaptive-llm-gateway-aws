@@ -114,6 +114,13 @@ def snapshot() -> dict:
             "curve": curve(a.alpha, a.beta),
         })
 
+    # The red series follows the model currently TAKING the most traffic, not
+    # the one with the highest posterior mean. Those differ whenever the cost
+    # dial is doing its job, and "red is where the traffic goes" is the version
+    # that reads from the back of a room in one glance. It also makes Demo 4
+    # unmistakable: kill the red model and the red visibly moves.
+    traffic_leader = max(bucket, key=lambda n: bucket[n].requests) if bucket else None
+
     pol = policy.load()
     return {
         "ts": time.time(),
@@ -121,7 +128,8 @@ def snapshot() -> dict:
         "policy_id": pol.policy_id if pol else None,
         "gamma": float(os.environ.get("ROUTER_GAMMA", "0.35")),
         "shadow": os.environ.get("ROUTER_SHADOW", "false").lower() == "true",
-        "leader": STATE.leader(tc),
+        "leader": traffic_leader,
+        "quality_leader": STATE.leader(tc),
         "total_requests": STATE.total_requests,
         "errors": STATE.total_errors,
         "uptime_s": round(time.time() - STATE.started_at, 1),

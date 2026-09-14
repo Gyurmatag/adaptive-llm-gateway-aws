@@ -38,6 +38,23 @@ SESSION_AFFINITY = os.environ.get("ROUTER_SESSION_AFFINITY", "true").lower() == 
 QUALITY_FLOOR = float(os.environ.get("ROUTER_QUALITY_FLOOR", "0.0"))
 PINNED_ARM = os.environ.get("ROUTER_PIN_ARM", "").strip()
 
+# Cold-start exploration floor.
+#
+# Without this the demo does not work, and the reason is worth stating on stage.
+# The real Bedrock fleet spans roughly a 50x cost range. With any gamma above
+# zero the cost term dominates the Thompson score so consistently that the
+# expensive arms are never sampled, never judged, and their posteriors stay at
+# the prior - a flat curve, which from the back of a room reads as a bug rather
+# than as an unexplored arm.
+#
+# So: until every arm has MIN_OBS real observations, a fraction of traffic is
+# steered to the least-observed arm. Once every arm clears the floor,
+# exploration stops entirely and pure Thompson sampling takes over. This is the
+# standard cold-start answer and it is honest - the alternative is a dashboard
+# that looks converged because most of it was never tried.
+MIN_OBS = int(os.environ.get("ROUTER_MIN_OBS", "30"))
+EXPLORE_P = float(os.environ.get("ROUTER_EXPLORE_P", "0.35"))
+
 
 def _cost_per_token(dep: dict) -> float:
     info = dep.get("model_info") or {}
@@ -97,8 +114,16 @@ class ThompsonRouter(CustomRoutingStrategyBase):
         return healthy.get(arm)
 
     def _select(self, healthy: dict[str, dict], task_class: str
-                ) -> tuple[str, dict[str, float], dict[str, float]]:
-        """The Thompson step. Returns (winner, thetas, scores)."""
+                ) -> tuple[str, dict[str, float], dict[str, float], str]:
+        """The Thompson step. Returns (winner, thetas, scores, reason)."""
+        # Cold-start exploration: steer to the least-observed arm until every
+        # arm has enough evidence for its curve to mean something.
+        under = [n for n in healthy
+                 if STATE.arm(n, task_class).observations < MIN_OBS]
+        if under and random.random() < EXPLORE_P:
+            winner = min(under, key=lambda n: STATE.arm(n, task_class).observations)
+            return winner, {}, {}, "cold_start_exploration"
+
         thetas: dict[str, float] = {}
         scores: dict[str, float] = {}
         for name, dep in healthy.items():
@@ -119,7 +144,7 @@ class ThompsonRouter(CustomRoutingStrategyBase):
             winner = max(thetas, key=lambda k: thetas[k]) if thetas else next(iter(healthy))
         else:
             winner = max(scores, key=lambda k: scores[k])
-        return winner, thetas, scores
+        return winner, thetas, scores, "thompson"
 
     # --------------------------------------------------------- LiteLLM contract
     async def async_get_available_deployment(
@@ -166,7 +191,7 @@ class ThompsonRouter(CustomRoutingStrategyBase):
             return pin
 
         # --- the bandit --------------------------------------------------------
-        winner, thetas, scores = self._select(healthy, task_class)
+        winner, thetas, scores, reason = self._select(healthy, task_class)
 
         # --- shadow mode: compute the choice, do not serve it -------------------
         if shadow.enabled():
@@ -180,7 +205,7 @@ class ThompsonRouter(CustomRoutingStrategyBase):
             self._sessions[sid] = (winner, time.time())
         STATE.record_choice(winner, task_class)
         audit({
-            "event": "route", "arm": winner, "reason": "thompson",
+            "event": "route", "arm": winner, "reason": reason,
             "task_class": task_class, "gamma": self.gamma,
             "theta": {k: round(v, 4) for k, v in thetas.items()},
             "score": {k: round(v, 4) for k, v in scores.items()},

@@ -12,7 +12,18 @@ cd "$(dirname "$0")/.."
 
 BASE="${GATEWAY_BASE_URL:-http://localhost:4000}"
 KEY="${LITELLM_MASTER_KEY:?LITELLM_MASTER_KEY not set}"
-TARGET="${1:-${PRIMARY_MODEL:-claude-sonnet}}"
+TARGET="${1:-${PRIMARY_MODEL:-auto}}"
+
+# On stage, kill whatever the dashboard is currently showing as dominant. A
+# model carrying 8% of traffic makes an undramatic failover; the traffic leader
+# makes the re-sort obvious from the back row.
+if [ "$TARGET" = "auto" ]; then
+  DASH="${DASHBOARD_BASE_URL:-http://localhost:8080}"
+  TARGET="$(curl -sS "$DASH/state" 2>/dev/null \
+    | python3 -c "import json,sys;print(json.load(sys.stdin).get('leader') or '')" 2>/dev/null)"
+  [ -z "$TARGET" ] && TARGET="claude-sonnet"
+  echo "==> auto-selected current traffic leader: $TARGET"
+fi
 
 echo "==> killing '$TARGET' on $BASE"
 

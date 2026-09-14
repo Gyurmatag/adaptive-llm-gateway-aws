@@ -1,0 +1,20 @@
+version: 1
+frontend:
+  phases:
+    preBuild:
+      commands:
+        - cd dashboard-web
+        - npm ci
+    build:
+      commands:
+        # NEXT_PUBLIC_* is inlined at build time, so the data plane URL must be
+        # set as an Amplify environment variable on the branch, not at runtime.
+        - npm run build
+  artifacts:
+    baseDirectory: dashboard-web/.next
+    files:
+      - '**/*'
+  cache:
+    paths:
+      - dashboard-web/node_modules/**/*
+      - dashboard-web/.next/cache/**/*

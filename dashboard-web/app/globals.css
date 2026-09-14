@@ -1,0 +1,71 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+/* ---------------------------------------------------------------------------
+   Shiwaforce brand tokens.
+
+   The dashboard and the slide deck have to read as one system on stage, so
+   these are the deck's tokens, not a second visual language. Red is a scalpel:
+   one leading series, one live number. If three things are red, two are wrong.
+--------------------------------------------------------------------------- */
+:root {
+  --sf-canvas: #fffaf6; /* warm canvas, page background */
+  --sf-navy: #0e1126;   /* dark navy, panels and headings */
+  --sf-warm-gray: #efeae6; /* panel and card fill */
+  --sf-red: #e51f40;    /* THE accent - leading series, the one live number */
+  --sf-gray: #5f606d;   /* secondary text, axis labels, captions */
+  --sf-ink: #000000;
+  --sf-on-dark: #ffffff;
+
+  /* Non-red series colours. Identity is never colour alone - every series
+     carries a direct label - but these stay stable per model so a model that
+     loses traffic keeps its colour. */
+  --sf-series-1: #0e1126;
+  --sf-series-2: #5f606d;
+  --sf-series-3: #9a9aa5;
+  --sf-series-4: #c4c0bb;
+}
+
+@theme inline {
+  --color-canvas: var(--sf-canvas);
+  --color-navy: var(--sf-navy);
+  --color-warm-gray: var(--sf-warm-gray);
+  --color-brand-red: var(--sf-red);
+  --color-muted-ink: var(--sf-gray);
+  --color-ink: var(--sf-ink);
+  --color-on-dark: var(--sf-on-dark);
+
+  --font-display: var(--font-bricolage);
+  --font-body: var(--font-manrope);
+}
+
+/* Flat only: no gradients, no drop shadows, minimal rounding. */
+* {
+  box-shadow: none !important;
+}
+
+html,
+body {
+  background: var(--sf-canvas);
+  color: var(--sf-ink);
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* The savings counter ticks every second. Without this the digits jitter
+   horizontally and the largest element on the screen looks unstable. */
+.counter {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+@keyframes sf-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.live-dot {
+  animation: sf-pulse 2s ease-in-out infinite;
+}
