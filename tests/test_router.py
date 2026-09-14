@@ -222,3 +222,49 @@ def test_snapshot_mode_is_deterministic_across_restarts(tmp_path, monkeypatch):
 
     monkeypatch.delenv("ROUTER_MODE")
     importlib.reload(tr)
+
+
+def test_stratification_keeps_separate_posteriors_per_task_class(monkeypatch):
+    """Slide 19 point 6: a context-free bandit optimises the traffic MIX.
+
+    With 80% easy traffic, a single posterior converges to whatever wins the
+    easy 80% and the hard 20% degrades silently. ROUTER_STRATIFY=true keeps a
+    posterior per task class so the two cannot be averaged together.
+    """
+    monkeypatch.setenv("ROUTER_STRATIFY", "true")
+
+    import importlib
+
+    import router.rewards as rw
+    importlib.reload(rw)
+
+    assert rw.task_class_of([{"content": "refactor this python function"}]) == "code"
+    assert rw.task_class_of([{"content": "capital of Hungary"}]) == "factual"
+
+    st = RouterState()
+    # cheap wins the easy 80%, premium wins the hard 20%
+    for _ in range(400):
+        st.record_outcome("cheap", True, task_class="factual")
+        st.record_outcome("premium", False, task_class="factual")
+    for _ in range(100):
+        st.record_outcome("cheap", False, task_class="code")
+        st.record_outcome("premium", True, task_class="code")
+
+    assert st.leader("factual") == "cheap"
+    assert st.leader("code") == "premium", (
+        "stratification failed: the hard class was swamped by the easy one")
+
+    # And the un-stratified view is exactly the failure mode being warned about.
+    flat = RouterState()
+    for _ in range(400):
+        flat.record_outcome("cheap", True)
+        flat.record_outcome("premium", False)
+    for _ in range(100):
+        flat.record_outcome("cheap", False)
+        flat.record_outcome("premium", True)
+    assert flat.leader() == "cheap", (
+        "the context-free bandit should converge to the easy-traffic winner - "
+        "that is the point being made on slide 19")
+
+    monkeypatch.delenv("ROUTER_STRATIFY")
+    importlib.reload(rw)
