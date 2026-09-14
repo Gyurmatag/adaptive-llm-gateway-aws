@@ -44,9 +44,16 @@ def STATE() -> RouterState:  # noqa: N802 - reads as a value at every call site
         return router_state.STATE
     if m != _mtime:
         _mtime = m
-        loaded = RouterState.load()
-        if loaded.total_requests or loaded.arms:
-            router_state.STATE = loaded
+        # Adopt whatever parsed, INCLUDING an empty state. An earlier version
+        # guarded with `if loaded.total_requests or loaded.arms`, meaning a
+        # legitimate reset - which is exactly an empty state - was rejected and
+        # the dashboard kept showing the previous run's numbers. Between two
+        # rehearsals that silently invalidates the second one.
+        try:
+            loaded = RouterState.from_dict(json.loads(STATE_PATH.read_text()))
+        except (OSError, ValueError, TypeError, KeyError):
+            return router_state.STATE  # corrupt mid-write; keep what we have
+        router_state.STATE = loaded
     return router_state.STATE
 
 app = FastAPI(title="Adaptive LLM Gateway - dashboard data plane")

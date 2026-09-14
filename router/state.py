@@ -171,11 +171,21 @@ class RouterState:
         self.since_decay = 0
         return True
 
-    def reset(self) -> None:
-        """Back to priors. Used by scripts/reset_demo.sh between rehearsals."""
-        for bucket in self.arms.values():
-            for a in bucket.values():
-                bucket[a.name] = ArmState(name=a.name)
+    def reset(self, keep_arm_names: bool = False) -> None:
+        """Back to priors. Used by scripts/reset_demo.sh between rehearsals.
+
+        By default the arm dictionary is emptied rather than re-primed. Arms
+        re-register themselves on the next request, and clearing them is what
+        removes arms that should not be there at all - a mis-keyed deployment
+        leaves a junk posterior behind that would otherwise survive every reset
+        and draw a permanent flat curve on the dashboard.
+        """
+        if keep_arm_names:
+            for bucket in self.arms.values():
+                for a in list(bucket.values()):
+                    bucket[a.name] = ArmState(name=a.name)
+        else:
+            self.arms = {}
         self.total_requests = 0
         self.total_errors = 0
         self.actual_spend_usd = 0.0

@@ -59,12 +59,28 @@ curl -sS -X POST "$BASE/cache/flushall" -H "Authorization: Bearer $KEY" >/dev/nu
   || echo "    (no cache endpoint; flush Valkey directly if Demo 2 misbehaves)"
 
 # --- 4. router state ----------------------------------------------------------
-echo "  - clearing router posteriors, audit and shadow logs"
-rm -f router/state/posteriors.json router/state/audit.jsonl router/state/shadow.jsonl
-curl -sS -X POST "$BASE/../reset" >/dev/null 2>&1 || true
+# The posteriors live in the GATEWAY process's memory. Deleting the state file
+# does nothing: the gateway rewrites it from memory a second later. The
+# sentinel is picked up by the installer watchdog inside the gateway, which
+# resets in-memory state and clears the logs.
+echo "  - signalling the gateway to reset its posteriors"
+STATE_DIR="${ROUTER_STATE_DIR:-router/state}"
+mkdir -p "$STATE_DIR" && touch "$STATE_DIR/RESET"
+
+DEADLINE=$(( $(date +%s) + 20 ))
+while [ -f "$STATE_DIR/RESET" ] && [ "$(date +%s)" -lt "$DEADLINE" ]; do sleep 1; done
+if [ -f "$STATE_DIR/RESET" ]; then
+  echo "    !! gateway did not consume the reset sentinel in 20s." >&2
+  echo "       If the gateway is remote it does not share this filesystem -" >&2
+  echo "       recycle the ECS task instead:" >&2
+  echo "       aws ecs update-service --cluster <c> --service <s> --force-new-deployment" >&2
+else
+  echo "    posteriors reset to priors"
+fi
+
 DASH="${DASHBOARD_BASE_URL:-http://localhost:8080}"
-curl -sS -X POST "$DASH/admin/reset" >/dev/null 2>&1 \
-  && echo "    dashboard state reset" \
-  || echo "    (dashboard not reachable at $DASH; it reloads priors on restart)"
+DASH_REQS=$(curl -sS "$DASH/state" 2>/dev/null \
+  | python3 -c "import json,sys;print(json.load(sys.stdin)['total_requests'])" 2>/dev/null || echo "?")
+echo "    dashboard now reports $DASH_REQS requests (expected 0)"
 
 echo "==> reset complete. Budget full, cache cold, posteriors at priors."

@@ -27,8 +27,8 @@ Config:
 
 from __future__ import annotations
 
-import asyncio
 import os
+import threading
 import time
 
 try:
@@ -54,42 +54,68 @@ class ThompsonInstaller(CustomLogger):
         super().__init__()
         self.installed = False
         self.strategy: ThompsonRouter | None = None
-        self._task: asyncio.Task | None = None
+        self._thread: threading.Thread | None = None
         self._start()
 
     def _start(self) -> None:
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            # Imported before the event loop exists, which is the normal case.
-            # install_now() is also called from the logging hooks below, so a
-            # missing loop here is not a failure.
-            return
-        self._task = loop.create_task(self._wait_and_install())
+        """Run the watchdog on a daemon THREAD, not an asyncio task.
 
-    async def _wait_and_install(self) -> None:
-        """Install, then keep watching. This never stops on purpose.
+        An asyncio task created at import time dies when the loop it was
+        created on closes, and LiteLLM's proxy does its config loading on a
+        temporary loop. The symptom was subtle: the strategy installed
+        correctly at startup (proving the task ran once), and then the watchdog
+        was simply gone - so the reset sentinel was never consumed and a
+        rebuilt Router would never have been re-patched.
 
-        The proxy REBUILDS its Router after startup and again on every
-        `POST /model/update` - which is exactly what scripts/kill_primary.sh
-        calls for Demo 4. A rebuild silently drops both the custom strategy and
-        the reward wrapper, so a one-shot install would leave the gateway
-        serving with simple-shuffle from the most important moment of the talk
-        onwards, with a dashboard still showing stale posteriors.
-
-        So: re-install whenever the live Router is not the one we patched.
+        Both install_now() and _check_reset() are synchronous, so a plain
+        thread is the simpler and more durable home for them.
         """
+        self._thread = threading.Thread(
+            target=self._watch_forever, name="thompson-installer", daemon=True)
+        self._thread.start()
+
+    def _watch_forever(self) -> None:
         waited = 0.0
         while True:
-            installed = self.install_now()
-            if not installed and waited < _INSTALL_TIMEOUT_S:
-                waited += 1.0
-            elif not installed and waited >= _INSTALL_TIMEOUT_S:
-                print("[thompson] ERROR: proxy Router never appeared; "
-                      "the gateway is serving with its DEFAULT strategy",
+            try:
+                self._check_reset()
+                if not self.install_now():
+                    waited += _WATCH_INTERVAL_S
+                    if waited >= _INSTALL_TIMEOUT_S:
+                        print("[thompson] ERROR: proxy Router never appeared; "
+                              "the gateway is serving with its DEFAULT strategy",
+                              flush=True)
+                        waited = 0.0
+            except Exception as e:  # noqa: BLE001 - the watchdog must not die
+                print(f"[thompson] watchdog error: {type(e).__name__}: {e}",
                       flush=True)
-                waited = 0.0
-            await asyncio.sleep(_WATCH_INTERVAL_S)
+            time.sleep(_WATCH_INTERVAL_S)
+
+    @staticmethod
+    def _check_reset() -> None:
+        """Honour the reset sentinel dropped by scripts/reset_demo.sh.
+
+        The posteriors live in THIS process's memory. Deleting the state file
+        from outside does nothing - the gateway simply rewrites it a second
+        later from memory, which is why the first rehearsal started with 864
+        requests and 10 errors already on the board. A sentinel file is the
+        one signal that reaches in here without adding an admin endpoint to
+        someone else's proxy.
+        """
+        from router.state import STATE, STATE_PATH
+
+        sentinel = STATE_PATH.parent / "RESET"
+        if not sentinel.exists():
+            return
+        STATE.reset()
+        try:
+            STATE.save()
+            sentinel.unlink()
+            for stale in ("audit.jsonl", "shadow.jsonl"):
+                (STATE_PATH.parent / stale).unlink(missing_ok=True)
+        except OSError:
+            pass
+        print("[thompson] state reset to priors", flush=True)
 
     def install_now(self) -> bool:
         """Idempotent, and re-arms itself if the proxy swapped the Router out."""
