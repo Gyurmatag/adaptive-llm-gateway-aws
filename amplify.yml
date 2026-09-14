@@ -1,3 +1,6 @@
+# Amplify build spec. Lives at the REPO ROOT, not in dashboard-web/, because
+# its commands cd into dashboard-web - a spec inside that directory would
+# never be found by Amplify and the build would fall back to autodetection.
 version: 1
 frontend:
   phases:
