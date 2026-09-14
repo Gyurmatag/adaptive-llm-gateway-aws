@@ -16,13 +16,13 @@ the wording of the motif marker on the routing layer.
 | `branch-decision.md` | Slide 16 second half, slides 11 and 20 motif markers | **Ready.** Branch B, decided on question 2. Includes the exact 5-beat script for slide 16. |
 | `architecture.md` | Slides 12 and 20 | **Ready.** Box list, arrows, maturity label per box, paired with text labels for colour blindness. |
 | `deploy-lessons.md` | Slide 19 first half | **Ready.** Three lessons with the real error strings, plus backups. |
-| `demo-timings.md` | Run of show validation | **Partial.** Local numbers measured. Deployed numbers pending. |
-| `e2e-test-report.md` | **Blocking gate** | **Partial.** One full run against the local stack, with real numbers. The second run and the hotspot run need the deployed stack. |
+| `demo-timings.md` | Run of show validation | **Measured.** Every beat timed on the local stack. Demo 5 and the fallback switch are unmeasured and marked so. |
+| `e2e-test-report.md` | **Blocking gate** | **PARTIALLY CLEARED.** One full 17-minute run with real numbers and captured headers. The deployed-stack runs, the hotspot run, Demo 5 and the `bedrock/converse/` ARN smoke test are all recorded as NOT executed. |
 | `preflight-checklist.md` | Pre-flight | **Ready.** Section 12 walked, with what is done vs blocked. |
 | `repo-url.txt` | Slide 21 QR | **Ready but PRIVATE.** URL is final; the repo must be flipped public before the talk. |
 | `dashboard-url.txt` | Pre-flight, slide 17 | **Blocked.** Amplify needs AWS credentials. |
-| `dashboard-converged.png` | Slide 17 planning, speaker notes | **Local capture.** From the real Next.js + shadcn app in the Shiwaforce brand, against live converging data. Not from Amplify. |
-| `dashboard-failover.png` | Slide 17 planning | **Local capture.** The moment after the kill switch, error counter at zero. |
+| `dashboard-converged.png` | Slide 17 planning, speaker notes | **Captured.** 2816 requests, four separated posteriors, $1.52 saved (85%), zero errors. Real Next.js + shadcn app in the Shiwaforce brand. Local, not Amplify. |
+| `dashboard-failover.png` | Slide 17 planning | **Captured.** After the kill switch: the red has moved to Claude Sonnet, the killed arm is gone from the split, error counter at zero. |
 | `ecs-console.png` | Slide 12 | **Blocked.** Needs a running ECS service. |
 
 ---

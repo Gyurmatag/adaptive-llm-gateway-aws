@@ -23,15 +23,21 @@ once the AWS stack is up.
 
 ## Measured
 
-| Beat | Measured (local) | Budget | Verdict |
+All from `handoff/e2e-test-report.md`, local stack, mock provider.
+
+| Beat | Measured | Budget | Verdict |
 |---|---|---|---|
-| Demo 1, three models | see e2e report, ~1.5s of actual request time | 90s | Fits with 88s of talking |
-| Demo 2, first ask | 385 ms | - | - |
-| Demo 2, reworded ask | **40 ms** | - | The gap is the demo |
-| Demo 2, total beat | ~5s of machine time | 60s | Fits easily |
+| Demo 1, three models | **2.1s** total (1012 / 791 / 333 ms) | 90s | Fits with ~88s of talking |
+| Demo 2, first ask | **305 ms** | - | - |
+| Demo 2, reworded ask | **46 ms** | - | **6.6x** - this ratio is the beat |
+| Demo 2, total machine time | ~0.4s | 60s | Fits easily |
 | Demo 3, convergence | 17 min of background load, **0s of stage time** | - | The stagecraft trick works |
-| Demo 4, kill switch to visible re-sort | see e2e report | 90s | - |
-| Demo 5, budget key to 429 | see e2e report | 10s | - |
+| Demo 3, first separation | **t+238s** (~4 min) | 17 min | Large margin |
+| Demo 4, kill switch | **0.09s** to fire | - | - |
+| Demo 4, killed arm to 0% of traffic | **8s** | - | Visible almost immediately |
+| Demo 4, full re-sort to 85% | **32s** | 90s | Fits, and wants silence not filler |
+| Demo 5, budget 429 | **NOT MEASURED** | 10s | Needs AWS |
+| Fallback switch | **NOT MEASURED** | - | Needs a deployed stack |
 
 **The important number is Demo 2's 385ms -> 40ms.** That ratio is the beat. It
 is visible without explanation and it costs five seconds of stage time.
