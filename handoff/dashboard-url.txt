@@ -1,0 +1,17 @@
+PENDING - Amplify deployment blocked on AWS credentials.
+
+The dashboard is built, verified and committed (dashboard-web/). It builds
+fully static, which is what Amplify needs, and has been run end to end against
+the live data plane locally at http://localhost:3000.
+
+Once credentials exist:
+  1. amplify.yml at the repo root is the build spec (already written)
+  2. Set NEXT_PUBLIC_DATA_PLANE_URL on the Amplify branch to the ALB origin.
+     It is inlined at BUILD time, so changing it needs a rebuild, not a
+     redeploy, and it must never be localhost.
+  3. Set DASHBOARD_CORS_ORIGIN on the ECS dashboard service to the exact
+     Amplify origin. Never "*".
+  4. Write the resulting https://<branch>.<appid>.amplifyapp.com URL here.
+
+Pre-flight depends on this: open it from the venue network and confirm the SSE
+stream connects through the ALB and the curves move.

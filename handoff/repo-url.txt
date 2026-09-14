@@ -1,0 +1,14 @@
+https://github.com/Gyurmatag/adaptive-llm-gateway-aws
+
+STATUS: created, populated, real commit history. Currently PRIVATE.
+
+Must be flipped to public before the talk - slide 21's QR code has to work
+while people are still in the room. The scrub (no account IDs, no ARNs, no
+internal resource names, in the repo AND in every handoff screenshot) is a
+precondition for flipping it.
+
+Owner: Gyurmatag (confirmed with the speaker, matches the @gyurmatag handle on
+slide 1). Licence: MIT (LICENSE committed).
+
+Flip with:
+  gh repo edit Gyurmatag/adaptive-llm-gateway-aws --visibility public --accept-visibility-change-consequences
