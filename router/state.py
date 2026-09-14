@@ -18,7 +18,7 @@ import json
 import os
 import random
 import time
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -203,7 +203,7 @@ class RouterState:
         }
 
     @classmethod
-    def from_dict(cls, d: dict) -> "RouterState":
+    def from_dict(cls, d: dict) -> RouterState:
         st = cls(
             total_requests=d.get("total_requests", 0),
             total_errors=d.get("total_errors", 0),
@@ -229,7 +229,7 @@ class RouterState:
         return p
 
     @classmethod
-    def load(cls, path: Path | None = None) -> "RouterState":
+    def load(cls, path: Path | None = None) -> RouterState:
         p = Path(path or STATE_PATH)
         if not p.exists():
             return cls()

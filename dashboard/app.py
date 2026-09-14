@@ -21,12 +21,33 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from router.state import STATE, GLOBAL_CLASS  # noqa: E402
+import router.state as router_state  # noqa: E402
 from router import policy  # noqa: E402
+from router.state import GLOBAL_CLASS, STATE_PATH, RouterState  # noqa: E402
+
+# The posteriors are owned by the GATEWAY process. This service is a separate
+# ECS task beside it, so it re-reads the state file whenever the gateway writes
+# it, rather than trusting the copy loaded at import - which never changes and
+# would leave the dashboard frozen at the priors for the whole talk.
+_mtime = 0.0
+
+
+def STATE() -> RouterState:  # noqa: N802 - reads as a value at every call site
+    global _mtime
+    try:
+        m = STATE_PATH.stat().st_mtime
+    except OSError:
+        return router_state.STATE
+    if m != _mtime:
+        _mtime = m
+        loaded = RouterState.load()
+        if loaded.total_requests or loaded.arms:
+            router_state.STATE = loaded
+    return router_state.STATE
 
 app = FastAPI(title="Adaptive LLM Gateway - dashboard data plane")
 
@@ -91,7 +112,7 @@ def curve(a: float, b: float, n: int = CURVE_POINTS) -> list[list[float]]:
 def snapshot() -> dict:
     """The /state payload. Also what the SSE stream pushes."""
     tc = GLOBAL_CLASS
-    bucket = STATE.arms.get(tc, {})
+    bucket = STATE().arms.get(tc, {})
     total_reqs = sum(a.requests for a in bucket.values()) or 1
 
     arms = []
@@ -129,25 +150,25 @@ def snapshot() -> dict:
         "gamma": float(os.environ.get("ROUTER_GAMMA", "0.35")),
         "shadow": os.environ.get("ROUTER_SHADOW", "false").lower() == "true",
         "leader": traffic_leader,
-        "quality_leader": STATE.leader(tc),
-        "total_requests": STATE.total_requests,
-        "errors": STATE.total_errors,
-        "uptime_s": round(time.time() - STATE.started_at, 1),
+        "quality_leader": STATE().leader(tc),
+        "total_requests": STATE().total_requests,
+        "errors": STATE().total_errors,
+        "uptime_s": round(time.time() - STATE().started_at, 1),
         "arms": arms,
     }
 
 
 def spend() -> dict:
-    saved = STATE.counterfactual_spend_usd - STATE.actual_spend_usd
+    saved = STATE().counterfactual_spend_usd - STATE().actual_spend_usd
     return {
         "ts": time.time(),
-        "actual_usd": round(STATE.actual_spend_usd, 6),
-        "counterfactual_usd": round(STATE.counterfactual_spend_usd, 6),
+        "actual_usd": round(STATE().actual_spend_usd, 6),
+        "counterfactual_usd": round(STATE().counterfactual_spend_usd, 6),
         "saved_usd": round(saved, 6),
-        "saved_pct": (round(100 * saved / STATE.counterfactual_spend_usd, 2)
-                      if STATE.counterfactual_spend_usd > 0 else 0.0),
-        "tokens": STATE.total_tokens,
-        "errors": STATE.total_errors,
+        "saved_pct": (round(100 * saved / STATE().counterfactual_spend_usd, 2)
+                      if STATE().counterfactual_spend_usd > 0 else 0.0),
+        "tokens": STATE().total_tokens,
+        "errors": STATE().total_errors,
     }
 
 

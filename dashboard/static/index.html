@@ -1,0 +1,76 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Standby dashboard</title>
+<!--
+  The standby dashboard.
+
+  Served by the local FastAPI, one keystroke away. An https Amplify page cannot
+  reliably fetch an http localhost gateway, so the branded Amplify dashboard is
+  NOT the fallback for the local standby stack - this is.
+
+  Deliberately plain and unbranded. It exists to survive a network failure, not
+  to look good. No build step, no dependencies, no fonts to load.
+-->
+<style>
+  body { background:#111; color:#eee; font:16px/1.4 ui-monospace,Menlo,monospace;
+         margin:0; padding:24px; }
+  h1 { font-size:22px; margin:0 0 16px; color:#fff; font-weight:600; }
+  .row { display:flex; gap:24px; flex-wrap:wrap; margin-bottom:20px; }
+  .box { border:1px solid #333; padding:14px 18px; min-width:170px; }
+  .k { color:#888; font-size:13px; text-transform:uppercase; letter-spacing:.05em; }
+  .v { font-size:40px; font-weight:700; font-variant-numeric:tabular-nums; }
+  .red { color:#E51F40; }
+  table { border-collapse:collapse; width:100%; max-width:900px; }
+  th,td { text-align:left; padding:7px 12px; border-bottom:1px solid #282828;
+          font-variant-numeric:tabular-nums; }
+  th { color:#888; font-weight:500; font-size:13px; }
+  .bar { height:12px; background:#E51F40; display:inline-block; vertical-align:middle; }
+  #status { font-size:13px; color:#888; }
+</style>
+<h1>Adaptive LLM Gateway - standby <span id="status">connecting</span></h1>
+<div class="row">
+  <div class="box"><div class="k">saved</div><div class="v red" id="saved">-</div></div>
+  <div class="box"><div class="k">errors</div><div class="v" id="errors">-</div></div>
+  <div class="box"><div class="k">requests</div><div class="v" id="reqs">-</div></div>
+  <div class="box"><div class="k">leader</div><div class="v" id="leader" style="font-size:24px">-</div></div>
+</div>
+<table>
+  <thead><tr><th>model</th><th>mean</th><th>obs</th><th>share</th><th></th></tr></thead>
+  <tbody id="rows"></tbody>
+</table>
+<script>
+(function () {
+  var statusEl = document.getElementById('status');
+  var es, retry = 0;
+
+  function render(p) {
+    var s = p.state, sp = p.spend;
+    document.getElementById('saved').textContent = '$' + sp.saved_usd.toFixed(2);
+    document.getElementById('errors').textContent = s.errors;
+    document.getElementById('errors').className = 'v' + (s.errors > 0 ? ' red' : '');
+    document.getElementById('reqs').textContent = s.total_requests;
+    document.getElementById('leader').textContent = s.leader || '-';
+    document.getElementById('rows').innerHTML = s.arms.map(function (a) {
+      return '<tr><td>' + a.model + '</td><td>' + a.mean.toFixed(3) + '</td><td>' +
+        a.observations + '</td><td>' + (a.share * 100).toFixed(1) + '%</td>' +
+        '<td><span class="bar" style="width:' + (a.share * 220).toFixed(0) + 'px"></span></td></tr>';
+    }).join('');
+  }
+
+  function connect() {
+    if (es) es.close();
+    es = new EventSource('/stream');
+    es.addEventListener('update', function (e) {
+      statusEl.textContent = 'live'; retry = 0;
+      try { render(JSON.parse(e.data)); } catch (_) {}
+    });
+    es.onopen = function () { statusEl.textContent = 'live'; retry = 0; };
+    es.onerror = function () {
+      statusEl.textContent = 'reconnecting';
+      es.close();
+      setTimeout(connect, Math.min(1000 * Math.pow(2, retry++), 10000));
+    };
+  }
+  connect();
+})();
+</script>

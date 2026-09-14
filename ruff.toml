@@ -1,0 +1,6 @@
+line-length = 100
+exclude = ["infra/upstream", ".venv", "dashboard-web"]
+
+[lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = ["E501", "B008"]

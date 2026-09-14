@@ -1,0 +1,136 @@
+# Mock fleet: the full stack with no cloud credentials and no spend.
+#
+# Same router, same judge loop, same fallback chains, same dashboard. Only the
+# provider is synthetic. Used to verify the plumbing offline, and kept as the
+# last-resort stage fallback if Bedrock access or the venue network fails.
+model_list:
+  - model_name: claude-sonnet
+    litellm_params:
+      model: openai/mock-premium
+      api_base: http://host.docker.internal:9100/v1
+      api_key: mock
+    model_info:
+      arm: true
+      input_cost_per_token: 0.000003
+      output_cost_per_token: 0.000015
+
+  - model_name: gpt-on-bedrock
+    litellm_params:
+      model: openai/mock-gpt
+      api_base: http://host.docker.internal:9100/v1
+      api_key: mock
+    model_info:
+      arm: true
+      input_cost_per_token: 0.00000125
+      output_cost_per_token: 0.00001
+
+  - model_name: ipr-nova
+    litellm_params:
+      model: openai/mock-mid
+      api_base: http://host.docker.internal:9100/v1
+      api_key: mock
+    model_info:
+      arm: true
+      input_cost_per_token: 0.00000035
+      output_cost_per_token: 0.0000014
+
+  - model_name: nova-lite
+    litellm_params:
+      model: openai/mock-cheap
+      api_base: http://host.docker.internal:9100/v1
+      api_key: mock
+    model_info:
+      arm: true
+      input_cost_per_token: 0.00000006
+      output_cost_per_token: 0.00000024
+
+  - model_name: judge
+    litellm_params:
+      model: openai/mock-judge
+      api_base: http://host.docker.internal:9100/v1
+      api_key: mock
+    model_info:
+      arm: false
+      input_cost_per_token: 0.000000035
+      output_cost_per_token: 0.00000014
+
+  # ------------------------------------------------------- the bandit's group
+  # LiteLLM's router chooses among deployments that SHARE a model_name. The
+  # entries above have unique names so Demo 1 can address them individually
+  # ("same curl, three model strings"); these duplicates put the same
+  # deployments into one group called `demo-router`, which is the candidate set
+  # the Thompson strategy actually samples over.
+  #
+  # model_info.id is set explicitly so the arm keeps a stable, readable name in
+  # the posteriors, the audit log and the dashboard. Without it LiteLLM
+  # generates a uuid and every curve is labelled with a hash.
+  - model_name: demo-router
+    litellm_params:
+      model: openai/mock-premium
+      api_base: http://host.docker.internal:9100/v1
+      api_key: mock
+    model_info:
+      id: claude-sonnet
+      arm: true
+      input_cost_per_token: 0.000003
+      output_cost_per_token: 0.000015
+  - model_name: demo-router
+    litellm_params:
+      model: openai/mock-gpt
+      api_base: http://host.docker.internal:9100/v1
+      api_key: mock
+    model_info:
+      id: gpt-on-bedrock
+      arm: true
+      input_cost_per_token: 0.00000125
+      output_cost_per_token: 0.00001
+  - model_name: demo-router
+    litellm_params:
+      model: openai/mock-mid
+      api_base: http://host.docker.internal:9100/v1
+      api_key: mock
+    model_info:
+      id: ipr-nova
+      arm: true
+      input_cost_per_token: 0.00000035
+      output_cost_per_token: 0.0000014
+  - model_name: demo-router
+    litellm_params:
+      model: openai/mock-cheap
+      api_base: http://host.docker.internal:9100/v1
+      api_key: mock
+    model_info:
+      id: nova-lite
+      arm: true
+      input_cost_per_token: 0.00000006
+      output_cost_per_token: 0.00000024
+
+router_settings:
+  # NOTE: `routing_strategy: custom` is REJECTED by the proxy - it only accepts
+  # the built-in strategy names. The custom extension point is SDK-only, so the
+  # strategy is installed at runtime by router/proxy_hook.py, loaded as a
+  # callback below. This value is the strategy that serves for the few hundred
+  # milliseconds before the shim swaps itself in.
+  routing_strategy: simple-shuffle
+  fallbacks:
+    - claude-sonnet:  ["gpt-on-bedrock", "ipr-nova", "nova-lite"]
+    - gpt-on-bedrock: ["claude-sonnet", "ipr-nova", "nova-lite"]
+    - ipr-nova:       ["nova-lite", "gpt-on-bedrock", "claude-sonnet"]
+    - nova-lite:      ["ipr-nova", "gpt-on-bedrock", "claude-sonnet"]
+  num_retries: 3
+  allowed_fails: 3
+  cooldown_time: 30
+
+litellm_settings:
+  # proxy_hook installs the Thompson strategy onto the proxy's Router at
+  # startup; rewards feed the posteriors from the success/failure callbacks.
+  callbacks: ["router.proxy_hook.instance"]
+  success_callback: ["router.rewards.on_success"]
+  failure_callback: ["router.rewards.on_failure"]
+  turn_off_message_logging: true
+  drop_params: true
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/DATABASE_URL
+  keepalive_timeout: 130

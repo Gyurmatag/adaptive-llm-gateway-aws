@@ -23,10 +23,10 @@ from typing import Any
 
 from router import policy, shadow
 from router.rewards import audit, task_class_of
-from router.state import STATE, GLOBAL_CLASS
+from router.state import STATE
 
 try:  # pragma: no cover - exercised only inside the proxy
-    from litellm.router_strategy.base_routing_strategy import CustomRoutingStrategyBase
+    from litellm.types.router import CustomRoutingStrategyBase
 except ImportError:  # keeps the module importable for tests without litellm
     class CustomRoutingStrategyBase:  # type: ignore[no-redef]
         pass
@@ -79,7 +79,12 @@ def _is_arm(dep: dict) -> bool:
 class ThompsonRouter(CustomRoutingStrategyBase):
     """Cost-aware Thompson sampling with session affinity and a snapshot mode."""
 
-    def __init__(self, gamma: float | None = None) -> None:
+    def __init__(self, llm_router: Any = None, gamma: float | None = None) -> None:
+        # Router.set_custom_routing_strategy() rebinds OUR bound method onto the
+        # LiteLLM Router, so inside async_get_available_deployment `self` is
+        # this object and not the Router. The Router therefore has to be held
+        # explicitly - there is no self.router to reach for.
+        self.llm_router = llm_router
         self.gamma = GAMMA if gamma is None else gamma
         # conversation id -> (arm_name, pinned_at)
         self._sessions: dict[str, tuple[str, float]] = {}
@@ -164,6 +169,11 @@ class ThompsonRouter(CustomRoutingStrategyBase):
 
         task_class = task_class_of(messages)
         STATE.ensure_arms(list(healthy), task_class)
+        if os.environ.get("ROUTER_DEBUG"):
+            r = self.llm_router
+            print(f"[dbg] acompletion={getattr(r.acompletion, '__name__', '?')} "
+                  f"wrapped={getattr(r, '_thompson_wrapped', None)} "
+                  f"arms={len(healthy)}", flush=True)
 
         # --- deterministic overrides and the circuit breaker ------------------
         if PINNED_ARM and PINNED_ARM in healthy:
@@ -217,19 +227,22 @@ class ThompsonRouter(CustomRoutingStrategyBase):
 
         This is what makes Demo 4 work without any custom failure handling:
         when kill_primary.sh zeroes the primary's rpm, LiteLLM drops it from
-        this list and the bandit simply never samples it again.
+        this list and the bandit simply never samples it again. Cooldowns,
+        rate-limit state and health checks all stay LiteLLM's job.
         """
+        r = self.llm_router
+        if r is None:
+            return []
         try:
-            deployments = await self.async_get_healthy_deployments(  # type: ignore[attr-defined]
-                model=model, request_kwargs=request_kwargs or {})
-            return list(deployments or [])
+            healthy, _all = await r._async_get_healthy_deployments(
+                model=model, parent_otel_span=None)
+            if healthy:
+                return list(healthy)
+        except (AttributeError, TypeError, ValueError):
+            pass
+        try:
+            return list(r.get_model_list(model_name=model) or [])
         except (AttributeError, TypeError):
-            router = getattr(self, "router", None) or getattr(self, "_router", None)
-            if router is not None:
-                try:
-                    return list(router.get_model_list(model_name=model) or [])
-                except (AttributeError, TypeError):
-                    pass
             return []
 
     # Sync path. LiteLLM calls this when a caller uses the blocking API.

@@ -22,8 +22,8 @@ import random
 import time
 from typing import Any
 
-from router.state import STATE, GLOBAL_CLASS
 from router import shadow
+from router.state import GLOBAL_CLASS, STATE
 
 JUDGE_MODEL = os.environ.get("JUDGE_MODEL_NAME", "judge")
 JUDGE_SAMPLE_RATE = float(os.environ.get("JUDGE_SAMPLE_RATE", "0.30"))
@@ -49,7 +49,45 @@ complete enough to send to a user. Reply with ONLY a JSON object:
 # counter. Set at startup by the router once it has seen the model list.
 MAX_COST_PER_TOKEN = 0.000015
 
+# The judge is a deployment inside the proxy's Router, not a bare provider
+# model, so it must be called through the Router. litellm.acompletion(model=
+# "judge") cannot resolve a router group name and fails with "LLM Provider NOT
+# provided" - which the judge's own except-clause then swallows, leaving the
+# posteriors silently frozen. proxy_hook sets this at install time.
+ROUTER = None
+
+# asyncio.create_task() returns a task that is only weakly referenced by the
+# loop. Without keeping a strong reference the task can be garbage collected
+# before it ever runs, which is exactly the kind of bug that looks like "the
+# judge is just slow" until nothing ever updates.
+_PENDING: set = set()
+
+
+def spawn(coro) -> None:
+    task = asyncio.ensure_future(coro)
+    _PENDING.add(task)
+    task.add_done_callback(_PENDING.discard)
+
 _AUDIT_PATH = os.environ.get("ROUTER_AUDIT_PATH", "router/state/audit.jsonl")
+
+# The router's posteriors live in the GATEWAY process; the dashboard is a
+# separate service on ECS. They share state through the state file, so the
+# gateway has to actually write it - throttled, because a write per request
+# would be pointless churn at 3 req/s.
+_PERSIST_INTERVAL_S = float(os.environ.get("ROUTER_PERSIST_INTERVAL", "1.0"))
+_last_persist = 0.0
+
+
+def _persist(force: bool = False) -> None:
+    global _last_persist
+    now = time.time()
+    if not force and (now - _last_persist) < _PERSIST_INTERVAL_S:
+        return
+    _last_persist = now
+    try:
+        STATE.save()
+    except OSError:
+        pass
 
 
 def audit(event: dict) -> None:
@@ -107,9 +145,13 @@ def _extract_score(raw: str) -> float | None:
 async def judge_score(question: str, answer: str) -> float | None:
     """Score an answer with the small judge model. Never raises."""
     try:
-        import litellm
-
-        resp = await litellm.acompletion(
+        if ROUTER is None:
+            audit({"event": "reward_error", "error": "judge router not set"})
+            return None
+        # _original_acompletion, not the wrapped one: the wrapper would observe
+        # the judge's own call and schedule a judge call for it, recursively.
+        call = getattr(ROUTER, "_thompson_original_acompletion", None) or ROUTER.acompletion
+        resp = await call(
             model=JUDGE_MODEL,
             messages=[{"role": "user", "content": JUDGE_PROMPT.format(
                 question=question[:2000], answer=answer[:2000])}],
@@ -117,9 +159,12 @@ async def judge_score(question: str, answer: str) -> float | None:
             temperature=0.0,
         )
         return _extract_score(resp.choices[0].message.content or "")
-    except Exception:
+    except Exception as e:  # noqa: BLE001
         # A judge failure must not fail the user's request or corrupt the
-        # posteriors. Returning None means "no reward this time".
+        # posteriors. Returning None means "no reward this time" - but it is
+        # audited, because a permanently broken judge is indistinguishable
+        # from a quiet one otherwise.
+        audit({"event": "judge_error", "error": f"{type(e).__name__}: {e}"[:200]})
         return None
 
 
@@ -151,6 +196,7 @@ async def score_and_update(
             STATE.actual_spend_usd += cost_usd
             STATE.total_tokens += tokens
             STATE.counterfactual_spend_usd += tokens * MAX_COST_PER_TOKEN
+        _persist()
         return
 
     score = await judge_score(question, answer)
@@ -172,6 +218,7 @@ async def score_and_update(
         "latency_ms": round(latency_ms, 1), "cost_usd": cost_usd,
         "decay_applied": decayed,
     })
+    _persist()
 
 
 # ------------------------------------------------------------ LiteLLM callbacks
@@ -191,11 +238,59 @@ def _usage(response: Any) -> tuple[int, float]:
     return total, cost
 
 
-def on_success(kwargs, response, start_time, end_time):
-    """LiteLLM success callback. Fans the reward job out and returns at once."""
+def _arm_name(kwargs) -> str:
+    """Which deployment actually served this request.
+
+    LiteLLM exposes the deployment identity in several places depending on
+    version and code path, so check them in order of specificity. Falling back
+    to kwargs["model"] alone is wrong here: for a grouped router that is the
+    GROUP name ("demo-router"), not the arm, and every posterior would collapse
+    onto a single fictional arm.
+    """
+    lp = kwargs.get("litellm_params") or {}
+    for src in (
+        (lp.get("model_info") or {}).get("id"),
+        (lp.get("metadata") or {}).get("model_info", {}).get("id")
+        if isinstance((lp.get("metadata") or {}).get("model_info"), dict) else None,
+        (lp.get("metadata") or {}).get("deployment_model_name"),
+        (kwargs.get("standard_logging_object") or {}).get("model_id"),
+        (kwargs.get("model_info") or {}).get("id"),
+    ):
+        if src and isinstance(src, str):
+            return src
+    return kwargs.get("model") or "unknown"
+
+
+def _schedule(coro) -> bool:
+    """Run the reward coroutine without ever blocking the response path."""
     try:
-        arm = (kwargs.get("litellm_params", {}).get("metadata", {}) or {}).get(
-            "deployment_model_name") or kwargs.get("model") or "unknown"
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    if loop is not None and loop.is_running():
+        loop.create_task(coro)
+        return True
+    # Called from a worker thread with no running loop: run it to completion on
+    # a private loop. The response has already been returned to the client by
+    # this point, so this costs the caller nothing.
+    try:
+        asyncio.run(coro)
+        return True
+    except RuntimeError:
+        coro.close()
+        return False
+
+
+def on_success(kwargs, response, start_time, end_time):
+    """LiteLLM success callback. Fans the reward job out and returns at once.
+
+    Failures are AUDITED rather than swallowed. An earlier version caught
+    everything with a bare pass, and the result was a reward loop that silently
+    never ran: 267 routing decisions, zero posterior updates, and a dashboard
+    that looked alive because traffic was flowing.
+    """
+    try:
+        arm = _arm_name(kwargs)
         messages = kwargs.get("messages") or []
         question = str(messages[-1].get("content", "")) if messages else ""
         try:
@@ -209,18 +304,19 @@ def on_success(kwargs, response, start_time, end_time):
         if shadow.enabled():
             shadow.record_actual(arm, tc, cost, latency_ms)
 
-        loop = asyncio.get_event_loop()
-        loop.create_task(score_and_update(
-            arm, question, answer, latency_ms, cost, tokens, tc))
-    except Exception:
-        pass
+        if not _schedule(score_and_update(
+                arm, question, answer, latency_ms, cost, tokens, tc)):
+            audit({"event": "reward_error", "arm": arm, "error": "no event loop"})
+    except Exception as e:  # noqa: BLE001 - must never fail the request
+        audit({"event": "reward_error", "error": f"{type(e).__name__}: {e}"})
 
 
 def on_failure(kwargs, response, start_time, end_time):
     """Failure callback. Counts the error the dashboard must keep at zero."""
     try:
-        arm = kwargs.get("model") or "unknown"
         STATE.total_errors += 1
-        audit({"event": "failure", "arm": arm, "error": str(response)[:300]})
-    except Exception:
-        pass
+        audit({"event": "failure", "arm": _arm_name(kwargs),
+               "error": str(response)[:300]})
+        _persist()
+    except Exception as e:  # noqa: BLE001
+        audit({"event": "failure_error", "error": f"{type(e).__name__}: {e}"})

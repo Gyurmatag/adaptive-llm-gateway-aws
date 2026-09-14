@@ -22,7 +22,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from router.state import RouterState, GLOBAL_CLASS
+from router.state import GLOBAL_CLASS, RouterState
 
 SNAPSHOT_PATH = Path(os.environ.get("ROUTER_POLICY_PATH", "router/state/policy.json"))
 SCHEMA_VERSION = 1
@@ -61,7 +61,7 @@ class Policy:
         }
 
     @classmethod
-    def from_dict(cls, d: dict) -> "Policy":
+    def from_dict(cls, d: dict) -> Policy:
         return cls(
             weights=d["weights"], best=d["best"], created_at=d["created_at"],
             gamma=d["gamma"], source_requests=d.get("source_requests", 0),

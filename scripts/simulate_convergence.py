@@ -65,6 +65,7 @@ async def run(gamma: float, lam: float, decay_every: int, rate: float,
     os.environ["ROUTER_EXPLORE_P"] = str(explore_p)
 
     import importlib
+
     import router.state as st
     importlib.reload(st)
     import router.thompson_router as tr
