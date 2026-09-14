@@ -24,8 +24,17 @@ from pathlib import Path
 
 from router.state import GLOBAL_CLASS, RouterState
 
-SNAPSHOT_PATH = Path(os.environ.get("ROUTER_POLICY_PATH", "router/state/policy.json"))
 SCHEMA_VERSION = 1
+
+
+def snapshot_path() -> Path:
+    """Resolved at call time, not import time.
+
+    Captured at import, a later ROUTER_POLICY_PATH silently has no effect - so
+    a promotion that points the gateway at a new policy artifact would load the
+    old one and nothing would say so.
+    """
+    return Path(os.environ.get("ROUTER_POLICY_PATH", "router/state/policy.json"))
 
 
 def mode() -> str:
@@ -105,7 +114,7 @@ def export(state: RouterState, gamma: float | None = None,
     )
     pol.policy_id = _policy_id(weights, g)
 
-    p = Path(path or SNAPSHOT_PATH)
+    p = Path(path or snapshot_path())
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(".tmp")
     tmp.write_text(json.dumps(pol.to_dict(), indent=2))
@@ -121,7 +130,7 @@ def _arm_cost(arm) -> float:
 
 
 def load(path: Path | None = None) -> Policy | None:
-    p = Path(path or SNAPSHOT_PATH)
+    p = Path(path or snapshot_path())
     if not p.exists():
         return None
     try:

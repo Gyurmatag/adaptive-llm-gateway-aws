@@ -90,7 +90,18 @@ class ThompsonRouter(CustomRoutingStrategyBase):
         self.gamma = GAMMA if gamma is None else gamma
         # conversation id -> (arm_name, pinned_at)
         self._sessions: dict[str, tuple[str, float]] = {}
-        self._policy = policy.load() if policy.mode() == "snapshot" else None
+        self._snapshot_mode = policy.mode() == "snapshot"
+        self._policy = policy.load() if self._snapshot_mode else None
+        if self._snapshot_mode and self._policy is None:
+            # Snapshot mode with no loadable artifact used to fall through to
+            # the live bandit in silence: you asked for deterministic serving,
+            # you got a self-modifying policy in the request path, and nothing
+            # said so. That is the exact failure a model risk review exists to
+            # catch. Serve deterministically anyway and be loud about it.
+            print("[thompson] WARNING: ROUTER_MODE=snapshot but no policy "
+                  f"artifact at {policy.snapshot_path()} - serving the "
+                  "posterior argmax deterministically, NOT sampling. Export "
+                  "one with: python -m router.policy export", flush=True)
 
     # ------------------------------------------------------------------ helpers
     def _session_id(self, request_kwargs: dict | None) -> str | None:
@@ -208,6 +219,14 @@ class ThompsonRouter(CustomRoutingStrategyBase):
             audit({"event": "route", "arm": name, "reason": "session_affinity",
                    "session": str(sid)[:24], "task_class": task_class})
             return pin
+
+        # --- snapshot mode with no artifact: deterministic, never sampled ------
+        if self._snapshot_mode and self._policy is None:
+            winner = max(healthy, key=lambda n: STATE.arm(n, task_class).mean)
+            STATE.record_choice(winner, task_class)
+            audit({"event": "route", "arm": winner, "reason": "snapshot_degraded",
+                   "task_class": task_class})
+            return healthy[winner]
 
         # --- the bandit --------------------------------------------------------
         winner, thetas, scores, reason = self._select(healthy, task_class)

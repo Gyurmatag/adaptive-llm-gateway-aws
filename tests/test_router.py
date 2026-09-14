@@ -131,3 +131,94 @@ def test_reward_requires_quality_and_latency():
     assert _reward(0.5, 100) is False
     assert _reward(0.9, 10**9) is False
     assert _reward(None, 10) is None
+
+
+# --------------------------------------------------------------- shadow mode
+# These two modules are the ones slide 19 claims a production story on, so they
+# get tested rather than merely shipped.
+
+def test_shadow_mode_serves_the_incumbent_but_logs_the_bandit(tmp_path, monkeypatch):
+    """Shadow mode must not change what is served. That is its whole point."""
+    monkeypatch.setenv("ROUTER_SHADOW", "true")
+    monkeypatch.setenv("ROUTER_INCUMBENT", "premium")
+    monkeypatch.setenv("ROUTER_SHADOW_PATH", str(tmp_path / "shadow.jsonl"))
+
+    import importlib
+
+    from router import shadow as sh
+    importlib.reload(sh)
+    import router.thompson_router as tr
+    importlib.reload(tr)
+
+    class R(tr.ThompsonRouter):
+        async def _healthy(self, model, rk):
+            return DEPS
+
+    r = R()
+    served = set()
+
+    async def go():
+        for _ in range(120):
+            d = await r.async_get_available_deployment(
+                GROUP, messages=[{"content": "hello"}])
+            served.add(d["model_name"])
+
+    asyncio.run(go())
+
+    # Every request served by the incumbent, regardless of what the bandit wanted.
+    assert served == {"premium"}, f"shadow mode changed serving: {served}"
+
+    report = sh.report(tmp_path / "shadow.jsonl")
+    assert report["requests"] == 120
+    # The bandit's preference was recorded even though it never served.
+    assert set(report["would_choose"]) <= {"premium", "cheap"}
+    assert 0.0 <= report["agreement_rate"] <= 1.0
+
+    monkeypatch.delenv("ROUTER_SHADOW")
+    importlib.reload(sh)
+    importlib.reload(tr)
+
+
+def test_snapshot_mode_is_deterministic_across_restarts(tmp_path, monkeypatch):
+    """A frozen policy must serve the same arm every time, and survive reload."""
+    from router import policy as pol
+
+    st = RouterState()
+    st.ensure_arms(["premium", "cheap"])
+    for i in range(150):
+        st.record_outcome("cheap", i % 6 != 0, cost_usd=1e-4, tokens=400,
+                          max_cost_per_token=1.5e-5)
+        st.record_outcome("premium", True, cost_usd=3e-3, tokens=400,
+                          max_cost_per_token=1.5e-5)
+
+    path = tmp_path / "policy.json"
+    exported = pol.export(st, gamma=0.35, path=path)
+
+    monkeypatch.setenv("ROUTER_MODE", "snapshot")
+    monkeypatch.setenv("ROUTER_POLICY_PATH", str(path))
+
+    import importlib
+
+    from router import policy as pol2
+    importlib.reload(pol2)
+    import router.thompson_router as tr
+    importlib.reload(tr)
+
+    class R(tr.ThompsonRouter):
+        async def _healthy(self, model, rk):
+            return DEPS
+
+    async def go(router):
+        return {(await router.async_get_available_deployment(
+            GROUP, messages=[{"content": "x"}]))["model_name"] for _ in range(80)}
+
+    first = asyncio.run(go(R()))
+    # A second instance stands in for a restart: same artifact, same behaviour.
+    second = asyncio.run(go(R()))
+
+    assert len(first) == 1, f"snapshot serving was not deterministic: {first}"
+    assert first == second, "a restart changed the served arm"
+    assert first == {exported.best["_all"]}
+
+    monkeypatch.delenv("ROUTER_MODE")
+    importlib.reload(tr)
