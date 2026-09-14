@@ -36,6 +36,7 @@ resource "aws_budgets_budget" "demo" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "billing" {
+  provider            = aws.billing
   alarm_name          = "${var.project}-billing"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 1
