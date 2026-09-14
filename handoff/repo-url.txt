@@ -1,14 +1,22 @@
 https://github.com/Gyurmatag/adaptive-llm-gateway-aws
 
-STATUS: created, populated, real commit history. Currently PRIVATE.
+STATUS: PUBLIC. Final URL. Generate the QR from exactly this string.
 
-Must be flipped to public before the talk - slide 21's QR code has to work
-while people are still in the room. The scrub (no account IDs, no ARNs, no
-internal resource names, in the repo AND in every handoff screenshot) is a
-precondition for flipping it.
+Scrub verified clean before publishing: no account IDs, no real ARNs, no
+secrets, no .env tracked. The only arn:aws: strings are a foundation-model ARN
+template (empty account field) and an AWS-managed IAM policy ARN. Both
+handoff screenshots are local-dashboard captures with no account data in
+frame.
+
+Re-run the scrub before the talk, since the deployment work still to come is
+exactly what introduces account identifiers:
+
+  grep -rEn '\b[0-9]{12}\b|arn:aws:[a-z0-9-]+:[a-z0-9-]*:[0-9]{12}:' \
+    --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=.next \
+    --exclude-dir=upstream --exclude-dir=.venv .
 
 Owner: Gyurmatag (confirmed with the speaker, matches the @gyurmatag handle on
 slide 1). Licence: MIT (LICENSE committed).
 
-Flip with:
-  gh repo edit Gyurmatag/adaptive-llm-gateway-aws --visibility public --accept-visibility-change-consequences
+If it ever needs to go back to private:
+  gh repo edit Gyurmatag/adaptive-llm-gateway-aws --visibility private --accept-visibility-change-consequences
