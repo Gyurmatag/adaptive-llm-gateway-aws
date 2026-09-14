@@ -1,0 +1,41 @@
+# secrets and local env
+.env
+.env.local
+config/.env
+*.pem
+*.key
+
+# terraform
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+.terraform/
+.terraform.lock.hcl
+tfplan
+*.tfvars
+!*.tfvars.example
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# node / next
+node_modules/
+.next/
+out/
+.amplify-hosting/
+next-env.d.ts
+
+# captured router state containing real spend
+router/state/*.json
+!router/state/.gitkeep
+loadgen/results/
+
+# local artifacts
+*.log
+.DS_Store
+handoff/recordings/
