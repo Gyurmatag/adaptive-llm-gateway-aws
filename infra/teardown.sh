@@ -86,10 +86,12 @@ fi
 ALB_ARN="$($AWS elbv2 describe-load-balancers --query 'LoadBalancers[0].LoadBalancerArn' --output text 2>/dev/null)"
 for L in $($AWS elbv2 describe-listeners --load-balancer-arn "$ALB_ARN" \
            --query 'Listeners[].ListenerArn' --output text 2>/dev/null); do
-  R="$($AWS elbv2 describe-rules --listener-arn "$L" \
-       --query "Rules[?Priority=='50'].RuleArn" --output text 2>/dev/null)"
-  [ -n "$R" ] && $AWS elbv2 delete-rule --rule-arn "$R" >/dev/null 2>&1 \
-    && echo "  deleted a /console listener rule"
+  for PRIO in 50 40; do
+    R="$($AWS elbv2 describe-rules --listener-arn "$L" \
+         --query "Rules[?Priority=='$PRIO'].RuleArn" --output text 2>/dev/null)"
+    [ -n "$R" ] && $AWS elbv2 delete-rule --rule-arn "$R" >/dev/null 2>&1 \
+      && echo "  deleted listener rule $PRIO ($([ "$PRIO" = 50 ] && echo /console || echo /openapi.json))"
+  done
 done
 
 if [ -n "$CONSOLE_TG" ] && [ "$CONSOLE_TG" != "None" ]; then

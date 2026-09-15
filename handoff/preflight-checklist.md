@@ -105,6 +105,57 @@ needs a look before the deck uses it.
 
 ---
 
+## Questions an AWS room will ask, with the answers
+
+**"Where are Bedrock Guardrails?"** Not used, deliberately. Guardrails is content
+safety - prompt-attack and topic filtering on the way in and out. This gateway's
+job is *which model answers*, and the two are orthogonal: you would run both. The
+honest answer is that adding it is a config block, not a rebuild - LiteLLM
+supports Bedrock Guardrails natively - and it was left out to keep the demo about
+routing. Say that rather than pretending it is covered. For a regulated
+deployment AWS recommends the **standard tier** over classic: better accuracy,
+broader language support, and it spreads load across Regions.
+
+**"How do you not get throttled?"** Every Anthropic and Amazon arm runs on an
+`eu.` inference profile, which is **Cross-Region Inference** - AWS's own answer
+to single-Region quotas. It raises aggregate throughput and keeps processing
+inside the EU. That is why `eu.anthropic.claude-...` rather than a bare model id,
+and a bare id is in fact rejected with "on-demand throughput isn't supported".
+
+The one arm that is *not* cross-Region is `openai.gpt-oss-120b-1:0`, which is
+ON_DEMAND and region-local - and that is the point of including it. All the
+OpenAI GPT-5.6 models in eu-central-1 are `global.` profiles only, so
+`gpt-oss-120b` is the EU-resident OpenAI option.
+
+**"What about rate limits on the judge?"** The judge is `nova-micro` and it does
+get throttled under sustained load - 429s appear in the log. It fails soft: a
+throttled judgement records no reward rather than a bad one, so the posteriors
+slow down instead of going wrong.
+
+---
+
+## What is deliberately NOT protected, and why
+
+`/dash/state`, `/dash/audit` and `/console` answer without a key. That is on
+purpose - the dashboard and the console are read-only views and the audit log
+never contains a prompt or a completion, only model names, reasons and scores.
+
+Everything that costs money or leaks configuration is closed. Verified on the
+public URL:
+
+```
+POST /v1/chat/completions   no key -> 401
+/model/info /v1/models /key/info /spend/logs /health -> 401
+/redoc /openapi.json -> closed via NO_DOCS
+```
+
+**One thing left open on purpose: `/ui`.** The LiteLLM admin UI is reachable and
+protected by the master key. It is no weaker than the API itself, and it is
+useful if you want to show virtual keys and spend live. To close it, set
+`DISABLE_ADMIN_UI=True` on the task definition and redeploy.
+
+---
+
 ## The three items that are not on the original list but should be
 
 1. **Confirm the gateway logs `[thompson] installed` after every restart.** If

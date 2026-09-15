@@ -151,6 +151,43 @@ so sampling them would add variance for nothing.
 
 ---
 
+## Hardening the public URL, and a variable that does not do what it says
+
+The stack is reachable from the internet for the length of the conference, so
+what answers without a key matters. Probed from outside:
+
+```
+POST /v1/chat/completions   no key -> 401     nobody can spend your money
+/model/info /v1/models /key/info /spend/logs  -> 401
+/health                                       -> 401
+/dash/state /dash/audit /console              -> 200   deliberate, read-only
+```
+
+Two things were open and are now closed. Both took reading LiteLLM's source
+rather than trusting the variable names:
+
+- **`NO_DOCS` does not disable `/redoc`.** `_get_docs_url()` is gated by
+  `NO_DOCS`; `_get_redoc_url()` is gated by a completely separate **`NO_REDOC`**.
+  Setting only the first leaves the full API reference public while looking like
+  it worked.
+- **`NO_DOCS` defaults the Swagger UI to `/`, not `/docs`.** That is why `/docs`
+  answered 404 from the start while the UI was live at the root the whole time.
+  With `NO_DOCS=True` the root now returns the string `LiteLLM: RUNNING`.
+- **`/openapi.json` has no switch at all.** It is FastAPI's, and LiteLLM does not
+  pass `openapi_url`. Closed with an ALB fixed-response rule at priority 40
+  instead of patching the app, so nothing about the container changed.
+
+**What was already right, from the guidance:** direct access to the load
+balancer returns **403**. Only CloudFront can reach it, enforced by a header
+condition on the listener - AWS's origin-protection pattern, in place before we
+touched anything.
+
+**Left open on purpose:** `/ui`, the LiteLLM admin console, behind the master
+key. No weaker than the API itself and useful if you want to show virtual keys
+live. `DISABLE_ADMIN_UI=True` closes it.
+
+---
+
 ## The honest framing for the beat
 
 Every one of these failed **silently**. None of them threw an error that named
