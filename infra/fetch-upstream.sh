@@ -28,7 +28,8 @@ python3 patch-upstream.py
 echo "==> layering the custom router into the gateway image"
 cp gateway.Dockerfile upstream/Dockerfile
 mkdir -p upstream/config
-cp ../config/config.yaml upstream/config/config.yaml
+# The deployed stack gets a TRANSFORMED config - see make-deployed-config.py.
+python3 make-deployed-config.py
 
 # deploy.sh builds from the upstream directory, so the router has to be inside
 # that build context.
