@@ -25,10 +25,17 @@ from typing import Any
 # Global task class, used when stratification is switched off.
 GLOBAL_CLASS = "_all"
 
-# How many recent selections the rolling traffic split covers. At 3 req/s this
-# is about a minute and a half - long enough to be stable on screen, short
-# enough that the Demo 4 re-sort is obvious within seconds.
-ROLLING_WINDOW = int(os.environ.get("ROUTER_ROLLING_WINDOW", "250"))
+# How many recent selections the rolling traffic split covers.
+#
+# This is a stage-timing decision, not a statistical one. The window has to
+# drain before a killed arm shows 0%, so it sets how long Demo 4 takes to
+# resolve visually. Measured on the deployed stack at 4 req/s with a window of
+# 250: the killed arm reached 0% at t+65s, against a 90s budget for the whole
+# beat. 150 brings that to roughly 40s, which leaves room to narrate.
+#
+# Smaller is snappier but noisier - below about 100 the split visibly jitters
+# between polls and looks unstable rather than live.
+ROLLING_WINDOW = int(os.environ.get("ROUTER_ROLLING_WINDOW", "150"))
 
 STATE_PATH = Path(os.environ.get("ROUTER_STATE_PATH", "router/state/posteriors.json"))
 

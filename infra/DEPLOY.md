@@ -294,7 +294,19 @@ learning from roughly half the traffic, each with its own view - and the
 dashboard shows whichever one the load balancer happened to pick for that
 poll. On stage the curves would visibly jump every second.
 
-For the demo, pin it:
+**And the pin does not survive a redeploy.** Terraform re-registers the
+scalable target from `MAX_CAPACITY` on every apply, so a pin applied by hand
+is silently undone the next time you deploy - which is exactly how Demo 4
+failed twice: the kill switch POSTed to one task while a second task kept
+serving the "killed" arm. Set it in `infra/upstream/.env`:
+
+```
+DESIRED_CAPACITY="1"
+MIN_CAPACITY="1"
+MAX_CAPACITY="1"
+```
+
+To pin an already-running service by hand:
 
 ```bash
 aws application-autoscaling register-scalable-target --service-namespace ecs \
