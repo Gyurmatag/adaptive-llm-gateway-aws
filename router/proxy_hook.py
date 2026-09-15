@@ -176,11 +176,54 @@ class ThompsonInstaller(CustomLogger):
             pass
 
         self._wrap_completion(router)
+        self._mount_dashboard()
 
         print(f"[thompson] {'re-installed (router was rebuilt)' if reinstall else 'installed'}: "
               f"gamma={self.strategy.gamma} arms={len(router.model_list or [])}",
               flush=True)
         return True
+
+    @staticmethod
+    def _mount_dashboard() -> None:
+        """Serve the dashboard's data endpoints from the gateway itself.
+
+        The posteriors are in-process state inside THIS container. A separate
+        ECS service cannot read them - there is no shared filesystem between
+        Fargate tasks - so the local architecture (gateway + a sidecar FastAPI
+        reading the same state file) does not survive the move to ECS.
+
+        Mounting the routes onto LiteLLM's own FastAPI app solves it outright:
+        the dashboard data comes from the process that owns the state, over the
+        same ALB and the same CloudFront distribution as the gateway. Same
+        origin, so the CORS pinning that dashboard-brief.md section 2 requires
+        becomes unnecessary in the deployed topology rather than fragile.
+
+        Local docker-compose keeps the standalone dashboard service, because
+        there the state file IS shared and it is useful to run the UI without
+        the gateway.
+        """
+        try:
+            from litellm.proxy import proxy_server
+        except ImportError:
+            return
+        app = getattr(proxy_server, "app", None)
+        if app is None or getattr(app, "_thompson_dashboard", False):
+            return
+        try:
+            import sys
+            from pathlib import Path
+            sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+            from dashboard.app import app as dash_app
+
+            # Mount rather than copy routes: the dashboard app keeps its own
+            # CORS middleware and its own static files.
+            app.mount("/dash", dash_app)
+            app._thompson_dashboard = True
+            print("[thompson] dashboard mounted at /dash "
+                  "(/dash/state, /dash/spend, /dash/stream)", flush=True)
+        except Exception as e:  # noqa: BLE001 - never block gateway startup
+            print(f"[thompson] dashboard mount failed: {type(e).__name__}: {e}",
+                  flush=True)
 
     def _wrap_completion(self, router) -> None:
         """Wrap Router.acompletion so every answer feeds the reward loop.

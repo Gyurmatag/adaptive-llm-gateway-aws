@@ -86,6 +86,10 @@ services:
       # cloud credentials - see scripts/mock_provider.py.
       - ${CONFIG_FILE:-./config/config.yaml}:/app/config.yaml:ro
       - ./router:/app/router:ro
+      # The dashboard package is mounted onto the gateway's own FastAPI app at
+      # /dash - see router/proxy_hook.py::_mount_dashboard. The deployed image
+      # COPYs it; locally it is bind-mounted so edits are picked up on restart.
+      - ./dashboard:/app/dashboard:ro
       - ./router/state:/app/router_state
       - ${HOME}/.aws:/aws:ro
     extra_hosts:

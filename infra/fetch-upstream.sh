@@ -35,6 +35,9 @@ python3 make-deployed-config.py
 # that build context.
 rm -rf upstream/router && cp -R ../router upstream/router
 rm -rf upstream/router/state && mkdir -p upstream/router/state
+rm -rf upstream/router/__pycache__
+rm -rf upstream/dashboard && cp -R ../dashboard upstream/dashboard
+rm -rf upstream/dashboard/__pycache__
 
 echo
 echo "==> upstream ready at infra/upstream"
