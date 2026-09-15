@@ -342,7 +342,26 @@ shared, versioned artifact, every task serves the same frozen weights, and
 adding tasks changes throughput rather than behaviour. The demo runs the mode
 that does not scale, and says so.
 
-### 12. Streaming and the ALB idle timeout
+### 12. A cached response does not stream, and that looks like broken streaming
+
+Measured on the deployed gateway, same prompt six times:
+
+```
+run 1: 31 chunks   <- cache miss, streams token by token
+run 2: 2 chunks    <- cache hit, same text, arrives whole
+run 3-6: 2 chunks
+```
+
+Nothing is wrong. A cached response has nothing to stream progressively, so it
+comes back as a couple of frames. But if you demonstrate streaming with a
+prompt you have already used, the text appears instantly and the beat looks
+like it failed - or worse, like streaming is not working at all.
+
+**Send `cache: {"no-cache": true}` for any streaming demonstration**, or use a
+prompt that has not been asked yet. The same applies to the smoke test: a
+streaming check that counts frames will "fail" on a warm cache.
+
+### 13. Streaming and the ALB idle timeout
 
 LiteLLM warns to keep `KEEPALIVE_TIMEOUT` **above** the load balancer idle
 timeout or streams get cut mid-flight. These are a matched pair:
