@@ -1,18 +1,27 @@
 # End-to-end test report
 
-**Gate status: PARTIALLY CLEARED.** Three full runs executed with real measured
-numbers and captured output:
+**Gate status: CLEARED.** Seven runs. The two that clear the gate are the last
+two, both against the **deployed AWS stack** (Amplify -> CloudFront -> ALB ->
+ECS -> Bedrock), both end to end with zero client-visible errors:
 
-- **Run 1** - local gateway, mock provider. Proves the plumbing.
-- **Run 2** - local gateway, **real Amazon Bedrock in eu-central-1**.
-- **Run 3** - the **deployed AWS stack**: Amplify -> CloudFront -> ALB -> ECS
-  -> Bedrock. The topology that will be on stage.
+| | Run 6 - office wifi | Run 7 - **phone hotspot** |
+|---|---|---|
+| Wall clock | 1084s | 1089s |
+| Client requests | ~2,200 | ~2,000 |
+| **Errors across the failover** | **0 -> 0** | **0 -> 0** |
+| Breaker at reset / after drill | `clean` / `clean` | `clean` / `clean` |
+| Convergence (leader vs worst) | 0.2253 > 0.0727 **separated** | 0.1174 > 0.0668 **separated** |
+| Top two | TIED (0.0180 vs 0.0684) | TIED (0.0487 vs 0.0812) |
+| Demo 5 budget block | 5 requests, 4s, HTTP 200 + body | 2 requests, 4s, HTTP 200 + body |
+| Fallback to standby | **622ms** | **666ms** |
+| Min observations, any arm | 54 | 57 |
 
-**Still NOT executed: the hotspot run.** It needs the machine moved onto a
-mobile hotspot, which is a physical act this build could not perform. Given
-that the office network dropped out completely during this build - taking a
-Terraform apply and a git push with it - that gate matters more than usual and
-remains genuinely open.
+Runs 1-3 are kept below for history: run 1 local with a mock provider, run 2
+local against real Bedrock, run 3 the first deployed run. Runs 4 and 5 are
+superseded - both were invalidated by the circuit-breaker defect documented
+further down, which is exactly why they are still described rather than deleted.
+
+Everything here is measured, not asserted. Nothing is simulated or extrapolated.
 
 Everything below is measured, not asserted. Nothing here is simulated or
 extrapolated.
@@ -455,6 +464,62 @@ the router takes the cheap one. `claude-haiku` leads on traffic at **2.9x less
 cost per request than `claude-sonnet`** at statistically identical quality. Say
 that, and point at the `gpt-on-bedrock` curve sitting clearly below the pack as
 the thing the router learned to avoid.
+
+---
+
+## The second way an arm goes quiet: LiteLLM withholds it
+
+Run 7, on the hotspot, froze `ipr-nova` at **19 observations from t+193 to
+t+735 - about nine minutes** - while every other arm climbed past 70. This was
+*not* the circuit-breaker bug; that was already fixed and the breaker read
+`clean` throughout.
+
+Everything that could have explained it was ruled out with live evidence:
+
+| Checked | Result |
+|---|---|
+| Our circuit breaker | `disabled_arms: []`, `disabled=False` on the arm |
+| LiteLLM cooldowns | `Cooldown Deployments=[]` |
+| Present in the group at all | yes - all 5 ids in `initial list of deployments` |
+| The arm actually working | **6/6 HTTP 200 in under 1.3s**, direct, over the same hotspot |
+| Runtime config | `gamma=0.1 EXPLORE_P=0.40 MIN_OBS=120 mode=learn` - all correct |
+| Session affinity | inert; the load generator sends no session id |
+| **The selection logic itself** | **exonerated** - replaying the live posteriors through the real `_select` gives `ipr-nova` **43.5%** via `cold_start_exploration`, exactly as designed |
+
+The pattern across runs settles it:
+
+```
+run 5  wired     ipr-nova reached 66 observations
+run 6  wired     ipr-nova reached 56
+run 4  hotspot   ipr-nova froze at 31
+run 7  hotspot   ipr-nova froze at 19 for ~9 minutes, then recovered to 62
+```
+
+**It is network flakiness surfacing as a silently missing arm.** LiteLLM cools a
+deployment down for `cooldown_time: 30` after `allowed_fails: 3`; on a flaky
+uplink it is re-cooled repeatedly, so a 30-second mechanism became a nine-minute
+absence. It then recovered on its own when the link settled.
+
+**The run still passed with zero errors.** A nine-minute arm outage in the middle
+of a rehearsal produced no client-visible failure at all - which is the Demo 4
+argument demonstrated by accident rather than by script.
+
+What was missing was any way to *see* it. The router now diffs LiteLLM's healthy
+list against the full list and announces the difference:
+
+```
+[thompson] LiteLLM is withholding 'ipr-nova' from the healthy list (cooldown or
+rate limit). It will not be sampled and its posterior will freeze.
+[thompson] 'ipr-nova' is back in the healthy list after 542s
+```
+
+with `arm_withheld` / `arm_restored` audit events, a `WITHHELD` file beside the
+state, and `withheld_arms` plus a per-arm `withheld` flag on `/state`. On the
+day, if the venue network is bad, the speaker sees which arm went quiet and why
+instead of wondering whether the bandit broke.
+
+**On stage this is a feature, not an apology.** "That arm just went away and the
+error count never moved" is the single best thing that can happen during Demo 3.
 
 ---
 

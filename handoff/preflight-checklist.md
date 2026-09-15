@@ -107,3 +107,19 @@ needs a look before the deck uses it.
 
    The rehearsal now does this automatically at beat 1 and after the drill, but
    if you ran a demo by hand, check it yourself.
+
+   **Same command, second field: `withheld_arms`.** That is the *other* way an
+   arm goes quiet - LiteLLM cooling a deployment down after failures, which on a
+   bad network it will do repeatedly. On the hotspot rehearsal that kept
+   `ipr-nova` out of routing for nine minutes while the error count stayed at
+   zero. It clears itself when the link settles; nothing to fix, but know which
+   one you are looking at:
+
+   ```bash
+   curl -sS "$DASHBOARD_BASE_URL/state" | python3 -c \
+     "import json,sys;d=json.load(sys.stdin);print('disabled',d['disabled_arms'],'withheld',d['withheld_arms'])"
+   ```
+
+   `disabled` is yours and needs clearing. `withheld` is LiteLLM's and needs
+   patience. If a curve stops moving on stage, this is the first thing to check,
+   and the gateway log says it in words: `[thompson] LiteLLM is withholding ...`.

@@ -17,7 +17,7 @@ the wording of the motif marker on the routing layer.
 | `architecture.md` | Slides 12 and 20 | **Ready.** Updated to what actually deployed, which differs from the plan in four ways. |
 | `deploy-lessons.md` | Slide 19 first half | **Ready.** Pick 2-3; `infra/DEPLOY.md` has twelve with verbatim errors. |
 | `demo-timings.md` | Run of show | **Measured.** |
-| `e2e-test-report.md` | **Blocking gate** | **Partially cleared.** Three full runs with real numbers, incl. the deployed stack. Hotspot run NOT executed. |
+| `e2e-test-report.md` | **Blocking gate** | **Cleared.** Seven runs; runs 6 and 7 both clean end to end against the deployed stack, run 7 over a phone hotspot. Zero errors across the failover in both. |
 | `preflight-checklist.md` | Pre-flight | **Ready.** |
 | `recording-shotlist.md` | Backup videos | **Ready** - but the recordings themselves need a human. |
 | `repo-url.txt` | Slide 21 QR | **Ready. PUBLIC.** CI green. |
@@ -31,9 +31,9 @@ the wording of the motif marker on the routing layer.
 
 ## What is blocked, and why
 
-**Two things, both needing a human.**
+**One thing, and it needs a human.**
 
-**1. `ecs-console.png`.** The browser extension available to this build could
+**`ecs-console.png`.** The browser extension available to this build could
 not save a screenshot to disk. The ECS service page has to be captured by
 hand. Before capturing, redact the account id - paste this in the browser
 console on the page:
@@ -49,10 +49,18 @@ document.querySelectorAll('[data-testid="awsc-nav-account-menu-button"],#nav-use
 The shot wants: service **Active**, **1 running | 0 pending**, and the load
 balancer target health table showing **1 Healthy / 0 Unhealthy**.
 
-**2. The hotspot rehearsal.** The machine has to be moved onto a mobile
-hotspot. This matters more than it usually would: the office network dropped
-out completely during this build, taking a Terraform apply and a git push with
-it. Everything else has been run three times; this has been run zero.
+Then save it to the path the manifest expects - attaching it in a chat window
+does not put it on disk:
+
+```bash
+screencapture -i handoff/ecs-console.png
+```
+
+**The hotspot rehearsal is DONE.** Run 7 executed end to end on a phone
+hotspot (172.20.10.x), after run 4's hotspot attempt was invalidated by the
+circuit-breaker bug. This mattered more than it usually would: the office
+network dropped out completely during this build, taking a Terraform apply and
+a git push with it.
 
 **What this means for the deck.** Nothing structural. `branch-decision.md` and
 `architecture.md` are the two structural gates in section 6.9 and both are
