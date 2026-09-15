@@ -20,9 +20,9 @@ const SERIES = ["#0E1126", "#5F606D", "#9A9AA5", "#C4C0BB", "#7A6F68"];
 // Stable order so a model keeps its colour across reconnects and resets.
 const ORDER = [
   "claude-sonnet",
+  "claude-haiku",
   "nova-lite",
   "gpt-on-bedrock",
-  "ipr-claude",
   "ipr-nova",
 ];
 
@@ -38,12 +38,24 @@ export function colorFor(model: string, leader: string | null): string {
   return model === leader ? SF.red : baseColor(model);
 }
 
+const NAMES: Record<string, string> = {
+  "claude-sonnet": "Sonnet",
+  "claude-haiku": "Haiku",
+  "nova-lite": "Nova Lite",
+  "gpt-on-bedrock": "GPT",
+  "ipr-nova": "IPR Nova",
+};
+
+/**
+ * Short, and short on purpose. Real models cluster far more tightly than a
+ * synthetic ladder does - four of five arms landed inside 0.80-0.88 on the
+ * real Bedrock run - so long labels collide into each other at the peaks.
+ */
 export function shortName(model: string): string {
+  if (NAMES[model]) return NAMES[model];
   return model
     .replace(/^bedrock\//, "")
+    .replace(/^direct-/, "")
     .replace(/^ipr-/, "IPR ")
-    .replace(/-on-bedrock$/, "")
-    .replace(/claude-sonnet/, "Claude Sonnet")
-    .replace(/nova-lite/, "Nova Lite")
-    .replace(/^gpt$/, "GPT");
+    .replace(/-on-bedrock$/, "");
 }

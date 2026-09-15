@@ -24,11 +24,19 @@ export function BetaCurves({
   const H = 360;
   const PAD = { top: 28, right: 28, bottom: 44, left: 28 };
 
-  const drawable = arms.filter((a) => a.curve?.length > 1);
+  // An arm with almost no observations has a near-flat posterior that spans
+  // the whole 0..1 range. Drawn, it squashes every real curve into a corner
+  // and adds a meaningless horizontal line - which is exactly what a fallback
+  // -served deployment did on the real Bedrock run. Below the floor it is not
+  // evidence yet, so it is not drawn.
+  const MIN_OBS_TO_DRAW = 5;
+  const drawable = arms.filter(
+    (a) => a.curve?.length > 1 && a.observations >= MIN_OBS_TO_DRAW,
+  );
   if (!drawable.length) {
     return (
       <div className="flex h-[360px] items-center justify-center text-2xl text-muted-ink">
-        waiting for traffic...
+        {arms.length ? "gathering evidence..." : "waiting for traffic..."}
       </div>
     );
   }
@@ -50,7 +58,7 @@ export function BetaCurves({
   const sy = (y: number) =>
     H - PAD.bottom - (y / yMax) * (H - PAD.top - PAD.bottom);
 
-  let labelRow = new Map<string, number>();
+  let labelPos = new Map<string, { x: number; row: number }>();
 
   const ticks = 5;
   const tickVals = Array.from(
@@ -99,20 +107,33 @@ export function BetaCurves({
       ))}
 
       {(() => {
-        // Direct labels collide when two peaks sit close together - three
-        // models near the same mean rendered as "GP-IPRnova-et" on the
-        // projector check. Stagger colliding labels onto separate rows rather
-        // than letting them overlap; a legend box would break the rule that
-        // identity is never colour alone.
+        // Real models cluster far more tightly than a synthetic ladder: on the
+        // real Bedrock run four of five arms landed inside 0.80-0.88, so three
+        // labels wanted the same few pixels. Stagger them onto rows AND nudge
+        // them apart horizontally, then draw a leader line back to the peak so
+        // a displaced label is never ambiguous. A legend box would be the easy
+        // fix and would break the rule that identity is never colour alone.
+        labelPos = new Map();
         const placed: { x: number; row: number }[] = [];
-        labelRow = new Map<string, number>();
-        for (const a of drawable) {
-          const peak = a.curve.reduce((m, p) => (p[1] > m[1] ? p : m), a.curve[0]);
-          const x = Math.min(Math.max(sx(peak[0]), 120), W - 120);
+        const ordered = [...drawable].sort((p, q) => {
+          const px = p.curve.reduce((m, c) => (c[1] > m[1] ? c : m), p.curve[0])[0];
+          const qx = q.curve.reduce((m, c) => (c[1] > m[1] ? c : m), q.curve[0])[0];
+          return px - qx;
+        });
+        for (const a of ordered) {
+          const peak = a.curve.reduce((m, c) => (c[1] > m[1] ? c : m), a.curve[0]);
+          const px = sx(peak[0]);
           let row = 0;
-          while (placed.some((q) => q.row === row && Math.abs(q.x - x) < 190)) row++;
-          placed.push({ x, row });
-          labelRow.set(a.model, row);
+          let lx = Math.min(Math.max(px, 110), W - 110);
+          while (placed.some((q) => q.row === row && Math.abs(q.x - lx) < 140)) {
+            row++;
+            // Alternate the nudge so a cluster fans out rather than marching
+            // in one direction off the edge of the plot.
+            const nudge = 105 * (row % 2 === 1 ? 1 : -1) * Math.ceil(row / 2);
+            lx = Math.min(Math.max(px + nudge, 110), W - 110);
+          }
+          placed.push({ x: lx, row });
+          labelPos.set(a.model, { x: lx, row });
         }
         return null;
       })()}
@@ -123,6 +144,8 @@ export function BetaCurves({
           `${i === 0 ? "M" : "L"}${sx(p[0]).toFixed(1)},${sy(p[1]).toFixed(1)}`,
         ).join(" ");
         const peak = a.curve.reduce((m, p) => (p[1] > m[1] ? p : m), a.curve[0]);
+        const pos = labelPos.get(a.model) ?? { x: sx(peak[0]), row: 0 };
+        const labelY = Math.max(sy(peak[1]) - 16, 26) + pos.row * 38;
 
         return (
           <g key={a.model}>
@@ -151,8 +174,8 @@ export function BetaCurves({
             <text
               // Keep the direct label fully inside the plot. A half-clipped
               // model name is worse than a nudged one.
-              x={Math.min(Math.max(sx(peak[0]), 120), W - 120)}
-              y={Math.max(sy(peak[1]) - 14, 22) + (labelRow.get(a.model) ?? 0) * 34}
+              x={pos.x}
+              y={labelY}
               textAnchor="middle"
               fontSize={isLeader ? 30 : 24}
               fontWeight={isLeader ? 800 : 600}
