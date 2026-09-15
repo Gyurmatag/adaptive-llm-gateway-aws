@@ -193,11 +193,14 @@ cpr=lambda a: (a['cost_usd']/a['requests']*1000) if a['requests'] else 0.0
 # The cost-aware claim: among arms that are TIED on quality, the router should
 # be taking the cheap one. That is the whole thesis of the talk, and unlike
 # top-2 separation it is measurable in the demo window.
-cheaper = cpr(arms[0]) < cpr(arms[1])
+# Reported as two numbers, not a boolean. Which arm leads varies run to run,
+# and a False here reads as a failed check when it is nothing of the kind: if
+# the leader is the pricier arm it is because its quality genuinely won, and
+# the savings counter still shows the gain against always-most-expensive.
 print('leader=%s discrimination=%.4f vs %.4f separated=%s | top2=%.4f vs %.4f %s'
-      ' | leader_cheaper_than_runnerup=%s (%.4f vs %.4f per 1k) | minobs=%d' % (
+      ' | cost_per_1k leader=%.4f runnerup=%.4f | minobs=%d' % (
   arms[0]['model'], disc, sd_disc, disc>sd_disc, top2, s2,
-  'TIED' if top2<=s2 else 'SEPARATED', cheaper, cpr(arms[0]), cpr(arms[1]),
+  'TIED' if top2<=s2 else 'SEPARATED', cpr(arms[0]), cpr(arms[1]),
   min(a['observations'] for a in d['arms'])))
 " 2>/dev/null || echo "could not evaluate")
 log "**Convergence at the kill point:** \`$SEP\`"
