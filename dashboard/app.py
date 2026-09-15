@@ -37,6 +37,21 @@ _mtime = 0.0
 
 
 def STATE() -> RouterState:  # noqa: N802 - reads as a value at every call site
+    """The router's state, refreshed from disk when a separate process owns it.
+
+    CRITICAL: this must never REBIND router_state.STATE.
+
+    router/thompson_router.py does `from router.state import STATE`, which
+    binds the object created at import. Rebinding the module attribute here
+    gave the dashboard a different object from the one the router mutates - so
+    /admin/reset zeroed the dashboard's copy while the router carried on
+    accumulating, and the next disk reload silently restored the old numbers.
+    Observed: a reset that reported `0 0` and a soak that showed 1277 requests
+    eleven seconds later.
+
+    So the loaded values are copied INTO the existing object. One identity,
+    shared by the router, the reward path and the dashboard, in-process or not.
+    """
     global _mtime
     try:
         m = STATE_PATH.stat().st_mtime
@@ -44,17 +59,27 @@ def STATE() -> RouterState:  # noqa: N802 - reads as a value at every call site
         return router_state.STATE
     if m != _mtime:
         _mtime = m
-        # Adopt whatever parsed, INCLUDING an empty state. An earlier version
-        # guarded with `if loaded.total_requests or loaded.arms`, meaning a
-        # legitimate reset - which is exactly an empty state - was rejected and
-        # the dashboard kept showing the previous run's numbers. Between two
-        # rehearsals that silently invalidates the second one.
         try:
             loaded = RouterState.from_dict(json.loads(STATE_PATH.read_text()))
         except (OSError, ValueError, TypeError, KeyError):
             return router_state.STATE  # corrupt mid-write; keep what we have
-        router_state.STATE = loaded
+        _adopt(router_state.STATE, loaded)
     return router_state.STATE
+
+
+def _adopt(target: RouterState, src: RouterState) -> None:
+    """Copy src's values into target, preserving target's identity."""
+    target.arms = src.arms
+    target.total_requests = src.total_requests
+    target.total_errors = src.total_errors
+    target.actual_spend_usd = src.actual_spend_usd
+    target.counterfactual_spend_usd = src.counterfactual_spend_usd
+    target.total_tokens = src.total_tokens
+    target.since_decay = src.since_decay
+    target.recent = src.recent
+    target.started_at = src.started_at
+    target.version = src.version
+
 
 app = FastAPI(title="Adaptive LLM Gateway - dashboard data plane")
 
@@ -293,10 +318,14 @@ async def admin_reset(authorization: str | None = Header(default=None)):
     first three minutes of a soak.
     """
     _require_admin(authorization)
+    global _mtime
     st = STATE()
     st.reset()
     try:
         st.save()
+        # Adopt our own write, so the next poll does not re-read a stale file
+        # and undo the reset.
+        _mtime = STATE_PATH.stat().st_mtime
         for stale in ("audit.jsonl", "shadow.jsonl", "DISABLED"):
             (STATE_PATH.parent / stale).unlink(missing_ok=True)
     except OSError:
