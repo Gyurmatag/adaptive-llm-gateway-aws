@@ -141,6 +141,20 @@ def curve(a: float, b: float, n: int = CURVE_POINTS) -> list[list[float]]:
             for i in range(n)]
 
 
+def withheld_arms() -> list[str]:
+    """Arms LiteLLM removed from its own healthy list: cooldown or rate limit.
+
+    Distinct from disabled_arms, which is OUR circuit breaker. Both make an arm
+    stop taking traffic and both used to look identical on the panel - a curve
+    that simply stopped moving.
+    """
+    try:
+        return sorted({x.strip() for x in
+                       (STATE_PATH.parent / "WITHHELD").read_text().split() if x.strip()})
+    except OSError:
+        return []
+
+
 def disabled_arms() -> list[str]:
     """Arms currently broken out of the circuit, read from the breaker file.
 
@@ -160,6 +174,7 @@ def snapshot() -> dict:
     tc = GLOBAL_CLASS
     bucket = STATE().arms.get(tc, {})
     broken = set(disabled_arms())
+    withheld = set(withheld_arms())
     total_reqs = sum(a.requests for a in bucket.values()) or 1
     rolling = STATE().rolling_share()
 
@@ -173,6 +188,8 @@ def snapshot() -> dict:
             # and the difference has to be visible. Without this the panel drew
             # a switched-off arm as a normal one with a stale curve.
             "disabled": name in broken,
+            # Withheld by LiteLLM (cooldown / rate limit), not by our breaker.
+            "withheld": name in withheld,
             "alpha": round(a.alpha, 4),
             "beta": round(a.beta, 4),
             "mean": round(a.mean, 4),
@@ -209,6 +226,7 @@ def snapshot() -> dict:
         "shadow": os.environ.get("ROUTER_SHADOW", "false").lower() == "true",
         "leader": traffic_leader,
         "disabled_arms": sorted(broken),
+        "withheld_arms": sorted(withheld),
         "quality_leader": STATE().leader(tc),
         "total_requests": STATE().total_requests,
         "errors": STATE().total_errors,

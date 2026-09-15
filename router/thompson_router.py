@@ -131,6 +131,14 @@ def _name(dep: dict) -> str:
     return (dep.get("model_info") or {}).get("id") or dep.get("model_name") or "unknown"
 
 
+def _name_set(deps) -> set[str]:
+    return {_name(d) for d in (deps or []) if _is_arm(d)}
+
+
+# Arms LiteLLM is currently withholding, and since when. Read by the dashboard.
+EXCLUDED: dict[str, float] = {}
+
+
 def _is_arm(dep: dict) -> bool:
     """The judge is a deployment but not a bandit arm."""
     return bool((dep.get("model_info") or {}).get("arm", True))
@@ -188,6 +196,36 @@ class ThompsonRouter(CustomRoutingStrategyBase):
             return None
         # A pin to a dead arm is worse than no pin - Demo 4 depends on this.
         return healthy.get(arm)
+
+    def _note_excluded(self, missing: set[str]) -> None:
+        """Record and announce arms LiteLLM removed from the healthy list.
+
+        Cooldowns are LiteLLM's job and that is the right division of labour -
+        but an arm disappearing from routing has to be SAYABLE, or it looks
+        like the bandit's fault for an entire rehearsal.
+        """
+        now = time.time()
+        for name in missing:
+            if name not in EXCLUDED:
+                print(f"[thompson] LiteLLM is withholding '{name}' from the "
+                      f"healthy list (cooldown or rate limit). It will not be "
+                      f"sampled and its posterior will freeze.", flush=True)
+                audit({"event": "arm_withheld", "arm": name})
+            EXCLUDED[name] = now
+        for name in [n for n in EXCLUDED if n not in missing]:
+            dur = now - EXCLUDED.pop(name)
+            print(f"[thompson] '{name}' is back in the healthy list after "
+                  f"{dur:.0f}s", flush=True)
+            audit({"event": "arm_restored", "arm": name, "withheld_s": round(dur, 1)})
+        try:
+            path = DISABLED_FILE.parent / "WITHHELD"
+            if EXCLUDED:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("\n".join(sorted(EXCLUDED)) + "\n")
+            else:
+                path.unlink(missing_ok=True)
+        except OSError:
+            pass
 
     def _select(self, healthy: dict[str, dict], task_class: str
                 ) -> tuple[str, dict[str, float], dict[str, float], str]:
@@ -340,6 +378,17 @@ class ThompsonRouter(CustomRoutingStrategyBase):
             healthy, _all = await r._async_get_healthy_deployments(
                 model=model, parent_otel_span=None)
             if healthy:
+                # LiteLLM can drop a deployment from this list - cooldowns after
+                # allowed_fails, rate-limit state, health checks - and when it
+                # does, the arm simply stops being offered to the bandit. From
+                # the dashboard that is indistinguishable from an arm the
+                # bandit chose not to sample: the curve just stops moving.
+                #
+                # Observed twice, both times on a phone hotspot: ipr-nova took 0
+                # selections for an entire rehearsal and sat frozen at 19
+                # observations while every other arm climbed past 60. Nothing
+                # anywhere said the deployment had been withheld.
+                self._note_excluded(_name_set(_all) - _name_set(healthy))
                 return list(healthy)
         except (AttributeError, TypeError, ValueError):
             pass

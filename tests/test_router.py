@@ -287,8 +287,15 @@ def test_breaker_excludes_arm_and_is_visible():
     import router.state as rstate
 
     with tempfile.TemporaryDirectory() as d:
-        os.environ["ROUTER_STATE_DIR"] = d
+        # ROUTER_STATE_PATH, not ROUTER_STATE_DIR. state.py reads the former and
+        # there is no such thing as the latter - so this test used to write its
+        # DISABLED file into the REPO's router/state/, switching ipr-nova and
+        # claude-sonnet off on the local gateway and leaving them off. A test
+        # that breaks the thing it is testing is worse than no test.
+        os.environ["ROUTER_STATE_PATH"] = os.path.join(d, "posteriors.json")
         importlib.reload(rstate)
+        assert str(rstate.STATE_PATH).startswith(d), (
+            f"test would write outside its temp dir: {rstate.STATE_PATH}")
         import dashboard.app as dash
         importlib.reload(dash)
 
