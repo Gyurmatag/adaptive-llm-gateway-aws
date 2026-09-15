@@ -81,11 +81,23 @@ log ""
 
 # ------------------------------------------------------------- beat 4 demo 2
 log "## Beat 4 - Demo 2: semantic cache on a reworded question"
-# Deliberately off-topic relative to loadgen/prompts.yaml. The load generator
-# has been seeding the semantic cache since beat 2, so a question resembling
-# anything in that pool is already warm and the beat shows 19ms vs 19ms.
-Q1="Describe in two sentences how a sourdough starter develops its sour flavour."
-Q2="In two sentences, what makes a sourdough starter turn sour?"
+# Two constraints on this pair, and they pull in opposite directions.
+#
+# 1. It must be OFF-POOL. The load generator has been seeding the semantic
+#    cache since beat 2, so a question resembling anything in
+#    loadgen/prompts.yaml is already warm and the beat shows no contrast at
+#    all - measured before this fix: 19ms then 19ms. The connection-pooling
+#    prompt was removed from the pool for exactly this reason.
+#
+# 2. The rewording must still clear the 0.85 similarity threshold on real
+#    Titan embeddings. Measured on amazon.titan-embed-text-v2:0:
+#       this pair                          0.9155  -> hits
+#       a sourdough paraphrase             0.8037  -> MISSES at 0.85
+#       an unrelated control               0.0668
+#    A rewording that feels equivalent to a human can still sit under the
+#    threshold. Measure it, do not assume it.
+Q1="Explain in two sentences why connection pooling reduces database latency."
+Q2="In two sentences, why does pooling connections cut latency to a database?"
 SPEND_BEFORE=$(curl -sS "$DASH/spend" 2>/dev/null | $PY -c "import json,sys;print(json.load(sys.stdin)['actual_usd'])" 2>/dev/null || echo 0)
 
 B=$(date +%s.%N)
