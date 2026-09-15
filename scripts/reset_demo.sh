@@ -35,10 +35,22 @@ case "$BASE" in
 esac
 
 if [ "$REMOTE" = "1" ]; then
+  # Prefer the admin endpoint: it resets in-process state in seconds, with no
+  # task replacement and no draining-task race. Fall back to recycling the task
+  # only if the endpoint is unavailable (older image, gateway wedged).
+  DASH_URL="${DASHBOARD_BASE_URL:-$BASE/dash}"
+  if curl -sS -m 15 -X POST "$DASH_URL/admin/reset" \
+       -H "Authorization: Bearer $KEY" 2>/dev/null | grep -q '"ok"'; then
+    echo "  - remote gateway: posteriors reset via /admin/reset"
+    REMOTE_RESET_DONE=1
+  fi
+
   CLUSTER="${ECS_CLUSTER:-litellm-stack-cluster}"
   SERVICE="${ECS_SERVICE:-LiteLLMService}"
-  echo "  - remote gateway: forcing a new ECS task (this IS the state reset)"
-  if aws ecs update-service --cluster "$CLUSTER" --service "$SERVICE" \
+  [ "${REMOTE_RESET_DONE:-0}" = "1" ] || echo "  - remote gateway: forcing a new ECS task (this IS the state reset)"
+  if [ "${REMOTE_RESET_DONE:-0}" = "1" ]; then
+    :
+  elif aws ecs update-service --cluster "$CLUSTER" --service "$SERVICE" \
        --force-new-deployment >/dev/null 2>&1; then
     echo "    waiting for the service to stabilise (~2-4 min)"
     aws ecs wait services-stable --cluster "$CLUSTER" --services "$SERVICE" 2>/dev/null \

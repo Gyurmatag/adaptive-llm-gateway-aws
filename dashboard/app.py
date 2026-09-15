@@ -19,7 +19,7 @@ import sys
 import time
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
@@ -67,7 +67,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_origins,
     allow_credentials=False,
-    allow_methods=["GET", "OPTIONS"],
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
     # The browser needs to read these on the semantic-cache demo.
     expose_headers=["x-litellm-semantic-similarity", "x-litellm-cache-hit"],
@@ -236,6 +236,72 @@ async def stream():
             "X-Accel-Buffering": "no",
         },
     )
+
+
+# --------------------------------------------------------------- admin control
+#
+# The kill switch and the reset are FILES in the gateway's state directory.
+# That works locally, where the directory is a bind mount, and cannot work on
+# ECS, where the task shares no filesystem with the laptop - so Demo 4 silently
+# did nothing against the deployed stack: the arm was written to the local
+# DISABLED file and kept taking 26% of traffic on ECS.
+#
+# These endpoints are mounted INSIDE the gateway process (see
+# router/proxy_hook.py::_mount_dashboard), so they reach the router that is
+# actually serving. They are the remote equivalent of touching the file.
+
+def _require_admin(auth: str | None) -> None:
+    """Master key required. These endpoints change live routing behaviour."""
+    expected = os.environ.get("LITELLM_MASTER_KEY", "")
+    token = (auth or "").removeprefix("Bearer ").strip()
+    if not expected or token != expected:
+        raise HTTPException(status_code=401, detail="master key required")
+
+
+@app.post("/admin/disable")
+async def admin_disable(arm: str, authorization: str | None = Header(default=None)):
+    """Break an arm out of the circuit. The Demo 4 kill switch."""
+    _require_admin(authorization)
+    path = STATE_PATH.parent / "DISABLED"
+    current = set()
+    if path.exists():
+        current = {x.strip() for x in path.read_text().split() if x.strip()}
+    current.add(arm)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(sorted(current)) + "\n")
+    return {"disabled": sorted(current)}
+
+
+@app.post("/admin/enable")
+async def admin_enable(authorization: str | None = Header(default=None)):
+    """Close the circuit breaker again."""
+    _require_admin(authorization)
+    path = STATE_PATH.parent / "DISABLED"
+    was = []
+    if path.exists():
+        was = sorted({x.strip() for x in path.read_text().split() if x.strip()})
+        path.unlink()
+    return {"restored": was}
+
+
+@app.post("/admin/reset")
+async def admin_reset(authorization: str | None = Header(default=None)):
+    """Reset posteriors to priors without replacing the task.
+
+    Far faster than forcing a new ECS deployment (seconds rather than minutes),
+    and it does not risk the draining-task race that silently discarded the
+    first three minutes of a soak.
+    """
+    _require_admin(authorization)
+    st = STATE()
+    st.reset()
+    try:
+        st.save()
+        for stale in ("audit.jsonl", "shadow.jsonl", "DISABLED"):
+            (STATE_PATH.parent / stale).unlink(missing_ok=True)
+    except OSError:
+        pass
+    return {"ok": True, "total_requests": st.total_requests}
 
 
 @app.get("/")

@@ -49,11 +49,34 @@ ROUTER_GROUP="${ROUTER_GROUP:-demo-router}"
 # and POST /model/delete returns 400 "not found in db", because config-defined
 # deployments are not in the database. Both look like they worked and the model
 # keeps serving. See router/thompson_router.py.
-STATE_DIR="${ROUTER_STATE_DIR:-router/state}"
-mkdir -p "$STATE_DIR"
-echo "$TARGET" >> "$STATE_DIR/DISABLED"
-sort -u "$STATE_DIR/DISABLED" -o "$STATE_DIR/DISABLED"
+#
+# LOCAL vs REMOTE matters here. The breaker is a file in the gateway's state
+# directory. Locally that is a bind mount and touching it works. On ECS the
+# task shares no filesystem with this laptop, so writing the file here did
+# nothing at all - measured on the deployed rehearsal: the arm was "killed"
+# and kept 26% of traffic. For a remote gateway the switch goes over HTTP to
+# the admin endpoint mounted inside the gateway process.
+case "$BASE" in
+  http://localhost*|http://127.0.0.1*) REMOTE=0 ;;
+  *) REMOTE=1 ;;
+esac
 
-echo "==> '$TARGET' broken out of the circuit. Watch the error counter stay at zero."
+if [ "$REMOTE" = "1" ]; then
+  DASH_URL="${DASHBOARD_BASE_URL:-$BASE/dash}"
+  RESP="$(curl -sS -m 15 -X POST "$DASH_URL/admin/disable?arm=$TARGET" \
+          -H "Authorization: Bearer $KEY" 2>&1)"
+  if printf '%s' "$RESP" | grep -q '"disabled"'; then
+    echo "==> '$TARGET' broken out of the circuit (remote). Watch the error counter stay at zero."
+  else
+    echo "!! remote kill FAILED: $(printf '%s' "$RESP" | head -c 200)" >&2
+    exit 1
+  fi
+else
+  STATE_DIR="${ROUTER_STATE_DIR:-router/state}"
+  mkdir -p "$STATE_DIR"
+  echo "$TARGET" >> "$STATE_DIR/DISABLED"
+  sort -u "$STATE_DIR/DISABLED" -o "$STATE_DIR/DISABLED"
+  echo "==> '$TARGET' broken out of the circuit. Watch the error counter stay at zero."
+fi
 echo "    restore with: scripts/reset_demo.sh"
 
