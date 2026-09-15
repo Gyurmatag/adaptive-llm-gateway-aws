@@ -19,7 +19,11 @@ jobs:
         run: ruff check router/ dashboard/ loadgen/ scripts/
       - name: unit tests
         run: |
-          pip install pytest
+          # fastapi because the breaker test imports dashboard/app.py, which is
+          # the thing that renders a disabled arm as disabled. A test that
+          # skipped itself here would be worse than no test: this repo has been
+          # bitten repeatedly by checks that pass while doing nothing.
+          pip install pytest fastapi
           python -m pytest tests/ -q
 
   web:
