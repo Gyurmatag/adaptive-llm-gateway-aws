@@ -74,7 +74,7 @@ needs a look before the deck uses it.
 
 ---
 
-## The two items that are not on the original list but should be
+## The three items that are not on the original list but should be
 
 1. **Confirm the gateway logs `[thompson] installed` after every restart.** If
    it does not, the gateway is serving with `simple-shuffle` and the whole
@@ -85,3 +85,25 @@ needs a look before the deck uses it.
    Reset silently did nothing for two rehearsals, and the second run started
    with the first run's numbers already on the board. `reset_demo.sh` now
    prints the dashboard's count so this is visible rather than assumed.
+
+3. **Confirm the circuit breaker is empty before you start.** One line:
+
+   ```bash
+   curl -sS "$DASHBOARD_BASE_URL/state" | python3 -c \
+     "import json,sys;print(json.load(sys.stdin)['disabled_arms'] or 'clean')"
+   ```
+
+   It must print `clean`. If it names an arm, that arm is switched off: it will
+   take no traffic, its curve will sit frozen where it was killed, and nothing
+   on the dashboard will say so. This cost two rehearsals - `ipr-nova` took 0
+   of 99 selections while looking merely under-observed. `kill_primary.sh`
+   leaves the killed arm in the breaker, so **any run that ends with Demo 4
+   leaves it dirty**. Clear it with:
+
+   ```bash
+   curl -sS -X POST "$DASHBOARD_BASE_URL/admin/enable" \
+     -H "Authorization: Bearer $LITELLM_MASTER_KEY"
+   ```
+
+   The rehearsal now does this automatically at beat 1 and after the drill, but
+   if you ran a demo by hand, check it yourself.
