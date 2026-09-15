@@ -141,33 +141,50 @@ export function Guardrails() {
             : "off — one pooled score"} />
         </div>
         {g.stratified && g.per_class && (
-          <div className="mt-4 overflow-x-auto border-t border-rule pt-4">
-            <table className="w-full min-w-[420px] text-[13.5px]">
-              <thead>
-                <tr className="text-left font-mono text-[10px] uppercase tracking-[0.1em] text-muted-ink">
-                  <th className="py-1 pr-4">Task type</th><th className="py-1">Best model here</th>
-                </tr>
-              </thead>
-              <tbody>
-                {Object.entries(g.per_class as Record<string, Record<string, any>>)
-                  .filter(([tc]) => tc !== "_all")
-                  .map(([tc, arms]) => {
-                    const ranked = Object.entries(arms).sort((a, b) => b[1].mean - a[1].mean);
-                    const top = ranked[0];
-                    return (
-                      <tr key={tc} className="border-t border-rule">
-                        <td className="py-2 pr-4 font-mono">{tc}</td>
-                        <td className="py-2">
-                          {top ? `${top[0]} · ${top[1].mean.toFixed(2)} over ${top[1].observations} obs` : "—"}
-                        </td>
-                      </tr>
-                    );
-                  })}
-              </tbody>
-            </table>
-            <p className="mt-3 text-[13.5px] text-muted-ink">
-              Different winners per row is the whole point: pooled, the easy traffic decides and
-              the hard traffic quietly gets worse.
+          <div className="mt-4 border-t border-rule pt-4">
+            <Explain title="The most important table on this screen">
+              <p>The same model can be the <b>best</b> at one kind of question and the <b>worst</b> at
+              another.</p>
+              <p>Average them together and that disappears — you get one mediocre-looking number, and
+              the router quietly gets worse at the hard questions while winning the easy ones.</p>
+            </Explain>
+            <div className="mt-4 overflow-x-auto">
+              <table className="w-full min-w-[520px] text-[13.5px]">
+                <thead>
+                  <tr className="text-left font-mono text-[10px] uppercase tracking-[0.1em] text-muted-ink">
+                    <th className="py-1 pr-4">Kind of question</th>
+                    <th className="py-1 pr-4">Best at it</th>
+                    <th className="py-1">Worst at it</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.entries(g.per_class as Record<string, Record<string, any>>)
+                    .filter(([tc]) => tc !== "_all")
+                    .sort(([a], [b]) => a.localeCompare(b))
+                    .map(([tc, arms]) => {
+                      const ranked = Object.entries(arms)
+                        .filter(([, v]) => v.observations > 0)
+                        .sort((a, b) => b[1].mean - a[1].mean);
+                      const top = ranked[0];
+                      const bot = ranked[ranked.length - 1];
+                      return (
+                        <tr key={tc} className="border-t border-rule">
+                          <td className="py-2 pr-4 font-mono">{tc}</td>
+                          <td className="py-2 pr-4">
+                            {top ? <><b>{top[0]}</b> <span className="tabular text-good">{top[1].mean.toFixed(2)}</span></> : "—"}
+                          </td>
+                          <td className="py-2">
+                            {bot && bot !== top ? <>{bot[0]} <span className="tabular text-brand-red">{bot[1].mean.toFixed(2)}</span></> : "—"}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </div>
+            <p className="mt-3 text-[14px] text-navy">
+              Look for a model that appears in both columns. That is the one a single pooled score
+              would have hidden.
             </p>
           </div>
         )}

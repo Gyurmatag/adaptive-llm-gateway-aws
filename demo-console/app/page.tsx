@@ -75,7 +75,9 @@ export default function Page() {
 
       <p className="mt-2 text-[13.5px] text-muted-ink">
         &ldquo;Saved&rdquo; compares what this actually cost against sending every single question to
-        the most expensive model.
+        the most expensive model. <b>Winning right now</b> is the model taking the most traffic —
+        which is deliberately not always the one with the best score, because a slightly worse
+        model at a fraction of the price is usually the right answer.
       </p>
 
       <div className="mt-5">
