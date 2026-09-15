@@ -246,7 +246,39 @@ Spend tracking is also slightly behind enforcement: the key showed
 `spend=0.000642` against `max_budget=0.0008` on the request that was blocked,
 because the blocking check uses a more current figure than `/key/info` reports.
 
-### 9. Streaming and the ALB idle timeout
+### 9. The cache wiring is different on ECS and locally, and both fail loudly only once
+
+Getting the deployed cache working took three separate corrections, each with
+its own silent failure:
+
+1. `redis-semantic` on ElastiCache - dies during startup right after
+   "passed cache type=redis-semantic", **no exception logged at all**. There is
+   no RediSearch on ElastiCache.
+2. `redis_url: os.environ/REDIS_URL` - the guidance's task definition sets
+   `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD` and `REDIS_SSL`. There is no
+   `REDIS_URL`, so the variable resolves to nothing and the gateway dies inside
+   `get_redis_client()`.
+3. Locally the opposite is true: `redis-semantic` REQUIRES `redis_url`, because
+   redisvl rejects host/port with no password.
+
+So the two environments genuinely need different cache blocks.
+`infra/make-deployed-config.py` generates the deployed one from the local one
+rather than maintaining two files by hand.
+
+### 10. The ElastiCache password sits in plaintext in the task definition
+
+Worth knowing before you show this architecture to anyone with a security
+review. The guidance passes `REDIS_PASSWORD` as a plain `environment` entry on
+the container definition, not as a `secrets` entry sourced from Secrets
+Manager. That means the value is readable by anyone with
+`ecs:DescribeTaskDefinition`, and it shows up in the console, in the CLI output
+and in any Terraform state dump.
+
+The stack already provisions Secrets Manager for the database URL, so the
+mechanism is there and simply is not used for this one. On a real deployment,
+move it. **Do not screenshot the task definition for the deck.**
+
+### 11. Streaming and the ALB idle timeout
 
 LiteLLM warns to keep `KEEPALIVE_TIMEOUT` **above** the load balancer idle
 timeout or streams get cut mid-flight. These are a matched pair:

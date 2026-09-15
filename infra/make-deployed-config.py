@@ -31,8 +31,18 @@ REPLACEMENT = """  cache: true
     # takes the whole gateway down during startup with nothing in the logs.
     # Exact-match caching still works; semantic matching does not. The local
     # standby runs Redis Stack and keeps the semantic cache.
+    #
+    # host/port/password, NOT redis_url: the guidance's ECS task definition
+    # sets REDIS_HOST, REDIS_PORT, REDIS_PASSWORD and REDIS_SSL - there is no
+    # REDIS_URL, so `redis_url: os.environ/REDIS_URL` resolves to nothing and
+    # the gateway dies in get_redis_client(). The local compose stack is the
+    # opposite: redis_url is required there because redisvl rejects
+    # host/port without a password. The two environments genuinely need
+    # different cache wiring.
     type: redis
-    redis_url: os.environ/REDIS_URL
+    host: os.environ/REDIS_HOST
+    port: os.environ/REDIS_PORT
+    password: os.environ/REDIS_PASSWORD
     ttl: 900
 """
 
