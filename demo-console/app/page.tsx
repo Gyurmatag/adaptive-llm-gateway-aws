@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Chat } from "@/components/Chat";
 import { DemoFanout, DemoCache, DemoKill, DemoBudget } from "@/components/Demos";
 import { Decisions } from "@/components/Decisions";
+import { Guardrails } from "@/components/Guardrails";
 import { Stat } from "@/components/ui";
 import { api } from "@/lib/base";
 
@@ -14,6 +15,7 @@ const TABS = [
   { id: "d4", label: "Demo 4 · kill" },
   { id: "d5", label: "Demo 5 · budget" },
   { id: "log", label: "Decisions · live log" },
+  { id: "guard", label: "Guardrails" },
 ] as const;
 
 export default function Page() {
@@ -90,6 +92,7 @@ export default function Page() {
         {tab === "d4" && <DemoKill onChange={refresh} />}
         {tab === "d5" && <DemoBudget />}
         {tab === "log" && <Decisions />}
+        {tab === "guard" && <Guardrails />}
       </div>
     </main>
   );

@@ -155,6 +155,15 @@ def withheld_arms() -> list[str]:
         return []
 
 
+def _runtime_snapshot():
+    """The admin override, or None when the process is running as configured."""
+    try:
+        from router import thompson_router as tr
+        return tr.RUNTIME.get("snapshot")
+    except Exception:  # noqa: BLE001 - litellm may be absent in tests
+        return None
+
+
 def disabled_arms() -> list[str]:
     """Arms currently broken out of the circuit, read from the breaker file.
 
@@ -169,10 +178,45 @@ def disabled_arms() -> list[str]:
         return []
 
 
+def _merged_bucket() -> dict:
+    """Arms summed across every task class.
+
+    With stratification off there is exactly one bucket (`_all`) and this is a
+    copy of it. With stratification ON the posteriors live under "code",
+    "reasoning", "summarization" and "factual" instead, and reading only `_all`
+    would show an empty dashboard - five flat curves and a zero - while the
+    router underneath was working perfectly. The headline panels show the whole
+    fleet; the per-class split is on /guardrails.
+    """
+    from copy import deepcopy
+
+    buckets = STATE().arms
+    if list(buckets) == [GLOBAL_CLASS]:
+        return buckets[GLOBAL_CLASS]
+    merged: dict = {}
+    for bucket in buckets.values():
+        for name, a in bucket.items():
+            if name not in merged:
+                merged[name] = deepcopy(a)
+                continue
+            m = merged[name]
+            m.successes += a.successes
+            m.failures += a.failures
+            m.requests += a.requests
+            m.total_latency_ms += a.total_latency_ms
+            m.total_cost_usd += a.total_cost_usd
+            m.total_tokens += a.total_tokens
+            # Beta parameters add: the prior is counted once, the evidence once
+            # per class.
+            m.alpha += a.alpha - 1.0
+            m.beta += a.beta - 1.0
+    return merged
+
+
 def snapshot() -> dict:
     """The /state payload. Also what the SSE stream pushes."""
     tc = GLOBAL_CLASS
-    bucket = STATE().arms.get(tc, {})
+    bucket = _merged_bucket()
     broken = set(disabled_arms())
     withheld = set(withheld_arms())
     total_reqs = sum(a.requests for a in bucket.values()) or 1
@@ -311,6 +355,99 @@ async def get_audit(limit: int = 60, event: str | None = None):
         wanted = {e.strip() for e in event.split(",") if e.strip()}
         rows = [r for r in rows if r.get("event") in wanted]
     return JSONResponse({"ts": time.time(), "count": len(rows), "entries": rows})
+
+
+@app.get("/guardrails")
+async def guardrails():
+    """Every guardrail the production-grade slide promises, with its live value.
+
+    One endpoint rather than five, because the question a risk reviewer asks is
+    "show me the controls", not "show me one control".
+    """
+    st = STATE()
+    pol = policy.load()
+    env = os.environ.get
+    per_class = {
+        tc: {n: {"mean": round(a.mean, 4), "observations": a.observations}
+             for n, a in bucket.items()}
+        for tc, bucket in st.arms.items()
+    }
+    return JSONResponse({
+        "ts": time.time(),
+        # --- take the learning out of production --------------------------
+        "mode": policy.mode() if _runtime_snapshot() is None else (
+            "snapshot" if _runtime_snapshot() else "learn"),
+        "policy_id": pol.policy_id if pol else None,
+        "policy_path": str(policy.snapshot_path()),
+        "shadow": env("ROUTER_SHADOW", "false").lower() == "true",
+        # --- keep a person above it ---------------------------------------
+        "pinned_arm": env("ROUTER_PINNED_ARM") or None,
+        "disabled_arms": disabled_arms(),
+        "withheld_arms": withheld_arms(),
+        # --- stop it optimising the wrong thing ----------------------------
+        "quality_floor": float(env("ROUTER_QUALITY_FLOOR", "0.0")),
+        "stratified": env("ROUTER_STRATIFY", "false").lower() == "true",
+        "task_classes": sorted(st.arms),
+        "per_class": per_class,
+        # --- the dials themselves ------------------------------------------
+        "gamma": float(env("ROUTER_GAMMA", "0.35")),
+        "min_observations": int(env("ROUTER_MIN_OBS", "30")),
+        "explore_p": float(env("ROUTER_EXPLORE_P", "0.35")),
+        "judge_sample_rate": float(env("JUDGE_SAMPLE_RATE", "0.30")),
+        "judge_threshold": float(env("JUDGE_SCORE_THRESHOLD", "0.7")),
+        "session_affinity": env("ROUTER_SESSION_AFFINITY", "true").lower() == "true",
+        "session_ttl_s": int(env("ROUTER_SESSION_TTL", "3600")),
+        "decay_lambda": float(env("ROUTER_DECAY_LAMBDA", "0.985")),
+    })
+
+
+@app.post("/admin/policy")
+async def admin_freeze(authorization: str | None = Header(default=None)):
+    """Freeze the live posteriors into a versioned policy and serve it.
+
+    Slide 19: "production serves a fixed, versioned policy: same input, same
+    route, every time, and you can diff two versions." Doing that with an
+    environment variable means a redeploy; on stage that is three minutes of
+    dead air, so it is a runtime switch.
+    """
+    _require_admin(authorization)
+    from router import thompson_router as tr
+
+    pol = policy.export(STATE(), gamma=float(os.environ.get("ROUTER_GAMMA", "0.35")))
+    tr.RUNTIME["policy"] = pol
+    tr.RUNTIME["snapshot"] = True
+    return {"mode": "snapshot", "policy_id": pol.policy_id,
+            "best": pol.best, "frozen_at": time.time()}
+
+
+@app.post("/admin/shadow")
+async def admin_shadow(on: bool = True, authorization: str | None = Header(default=None)):
+    """Run the bandit in shadow: it decides, the incumbent serves.
+
+    Slide 19: "a new policy runs in shadow first, logging what it would have
+    picked, and is promoted only when the log proves it right." shadow.enabled()
+    reads the environment on every call, so this takes effect on the next
+    request rather than on the next deploy.
+    """
+    _require_admin(authorization)
+    os.environ["ROUTER_SHADOW"] = "true" if on else "false"
+    return {"shadow": on, "incumbent": os.environ.get("ROUTER_INCUMBENT", "claude-sonnet")}
+
+
+@app.post("/admin/mode")
+async def admin_mode(mode: str = "learn", authorization: str | None = Header(default=None)):
+    """Back to learning, or into snapshot mode using whatever policy is loaded."""
+    _require_admin(authorization)
+    from router import thompson_router as tr
+
+    if mode not in ("learn", "snapshot"):
+        raise HTTPException(status_code=400, detail="mode must be learn or snapshot")
+    if mode == "learn":
+        tr.RUNTIME["policy"] = None
+        tr.RUNTIME["snapshot"] = False
+    else:
+        tr.RUNTIME["snapshot"] = True
+    return {"mode": mode}
 
 
 @app.get("/spend")

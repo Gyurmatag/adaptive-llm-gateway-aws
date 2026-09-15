@@ -90,6 +90,22 @@ export function DemoCache() {
               ? `Different words, same meaning — served from cache, ${res.speedup}x faster.`
               : "No semantic hit. Either this question is already cached from a previous ask, or the semantic cache sidecar is missing."}
           </p>
+          {res.hit && (
+            <div className="mt-3 rounded-sm bg-warm-gray px-4 py-3">
+              <p className="text-[14px] text-navy">
+                Billed for that answer:{" "}
+                <b className="text-good">${(res.spentUsd ?? 0).toFixed(8)}</b> and{" "}
+                <b className="text-good">{res.tokens ?? 0} tokens</b>. No model was called.
+              </p>
+              {res.headerCost && (
+                <p className="mt-1.5 text-[13px] text-muted-ink">
+                  The response header says <span className="font-mono">{res.headerCost}</span> — ignore it.
+                  LiteLLM replays the cached answer complete with the original usage, so a hit
+                  looks billed. The gateway&rsquo;s own counters are the ones that moved, and they didn&rsquo;t.
+                </p>
+              )}
+            </div>
+          )}
         </Panel>
       )}
     </section>

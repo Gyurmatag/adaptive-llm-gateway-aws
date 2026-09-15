@@ -45,6 +45,9 @@ export async function complete(model: string, content: string, opts: {
     servedBy: res.headers.get("x-litellm-model-id"),
     // The number Demo 2 turns on. Absent means the cache missed.
     similarity: res.headers.get("x-litellm-semantic-similarity"),
+    // Replayed from the ORIGINAL answer on a cache hit, so it overstates.
+    // Compare against the gateway's own spend counters, not this.
+    cost: res.headers.get("x-litellm-response-cost"),
     cacheKey: res.headers.get("x-litellm-cache-key"),
     error: body?.error ?? null,
   };

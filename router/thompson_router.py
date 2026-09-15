@@ -135,6 +135,15 @@ def _name_set(deps) -> set[str]:
     return {_name(d) for d in (deps or []) if _is_arm(d)}
 
 
+# Runtime overrides, set by the dashboard's admin endpoints.
+#
+# The constructor reads ROUTER_MODE once, which is right for a process that is
+# configured and then left alone - but "freeze the policy" is something a
+# speaker has to be able to do in front of a room, and a redeploy is three
+# minutes of dead air. None means "use whatever the constructor decided".
+RUNTIME: dict = {"snapshot": None, "policy": None}
+
+
 # Arms LiteLLM is currently withholding, and since when. Read by the dashboard.
 EXCLUDED: dict[str, float] = {}
 
@@ -315,12 +324,13 @@ class ThompsonRouter(CustomRoutingStrategyBase):
             return healthy[PINNED_ARM]
 
         # --- snapshot mode: frozen policy, deterministic serving ---------------
-        if self._policy is not None:
-            choice = self._policy.choose(task_class)
+        active_policy = RUNTIME["policy"] if RUNTIME["policy"] is not None else self._policy
+        if active_policy is not None:
+            choice = active_policy.choose(task_class)
             if choice in healthy:
                 STATE.record_choice(choice, task_class)
                 audit({"event": "route", "arm": choice, "reason": "snapshot",
-                       "policy_id": self._policy.policy_id, "task_class": task_class})
+                       "policy_id": active_policy.policy_id, "task_class": task_class})
                 return healthy[choice]
 
         # --- session affinity --------------------------------------------------
@@ -334,7 +344,8 @@ class ThompsonRouter(CustomRoutingStrategyBase):
             return pin
 
         # --- snapshot mode with no artifact: deterministic, never sampled ------
-        if self._snapshot_mode and self._policy is None:
+        snap = RUNTIME["snapshot"] if RUNTIME["snapshot"] is not None else self._snapshot_mode
+        if snap and active_policy is None:
             winner = max(healthy, key=lambda n: STATE.arm(n, task_class).mean)
             STATE.record_choice(winner, task_class)
             audit({"event": "route", "arm": winner, "reason": "snapshot_degraded",
@@ -357,6 +368,10 @@ class ThompsonRouter(CustomRoutingStrategyBase):
         STATE.record_choice(winner, task_class)
         audit({
             "event": "route", "arm": winner, "reason": reason,
+            # Slide 19: "every decision is logged with its reason and its cost".
+            # The blended per-token price of the arm chosen, so a reviewer can
+            # price a decision without joining to another table.
+            "cost_per_token": round(_cost_per_token(healthy[winner]), 12),
             "task_class": task_class, "gamma": self.gamma,
             "theta": {k: round(v, 4) for k, v in thetas.items()},
             "score": {k: round(v, 4) for k, v in scores.items()},

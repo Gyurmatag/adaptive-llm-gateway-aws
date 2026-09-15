@@ -47,4 +47,17 @@ ENV ROUTER_GAMMA=0.10 \
     JUDGE_SCORE_THRESHOLD=0.85 \
     ROUTER_GROUP=demo-router \
     ROUTER_MODE=learn \
-    ROUTER_ROLLING_WINDOW=150
+    ROUTER_ROLLING_WINDOW=150 \
+    # Slide 19, "stop it optimising the wrong thing".
+    #
+    # QUALITY_FLOOR: the router may chase a cheaper arm only while that arm's
+    # posterior mean stays above this. Set below every arm's current mean, so
+    # it is a live guardrail rather than a thumb on the scale - raise it past
+    # an arm's mean and that arm is excluded from routing outright.
+    ROUTER_QUALITY_FLOOR=0.50 \
+    # STRATIFY: score easy and hard traffic separately. Without it a bandit
+    # wins the easy 80% of traffic and quietly gets worse at the hard 20%,
+    # which is the correctness problem the production slide names. The
+    # dashboard sums the classes for its headline panels, so turning this on
+    # does not empty the curves - see dashboard/app.py _merged_bucket.
+    ROUTER_STRATIFY=true
