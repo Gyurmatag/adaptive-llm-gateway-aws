@@ -55,6 +55,20 @@ bash scripts/reset_demo.sh >/dev/null 2>&1
 log "- reset_demo.sh: $(( $(date +%s) - B ))s"
 STATE0=$(curl -sS "$DASH/state" 2>/dev/null | $PY -c "import json,sys;d=json.load(sys.stdin);print(d['total_requests'], d['errors'])" 2>/dev/null || echo "? ?")
 log "- state after reset (requests errors): \`$STATE0\`"
+
+# The circuit breaker MUST be empty before a soak. kill_primary.sh writes the
+# killed arm into DISABLED, and a run that ended with the drill leaves it there.
+# The router then withholds that arm from every selection while the dashboard
+# still draws it, so it looks under-observed rather than switched off. That is
+# exactly how ipr-nova took 0 selections through an entire rehearsal and made
+# the convergence gate fail for an unrelated reason. Never start blind again.
+BRK=$(curl -sS "$DASH/state" 2>/dev/null | $PY -c "import json,sys;print(','.join(json.load(sys.stdin).get('disabled_arms') or []))" 2>/dev/null || echo "?")
+if [ -n "$BRK" ] && [ "$BRK" != "?" ]; then
+  log "- !! circuit breaker was DIRTY after reset: \`$BRK\` - clearing"
+  curl -sS -m 15 -X POST "$DASH/admin/enable" -H "Authorization: Bearer $KEY" >/dev/null 2>&1
+  BRK=$(curl -sS "$DASH/state" 2>/dev/null | $PY -c "import json,sys;print(','.join(json.load(sys.stdin).get('disabled_arms') or []))" 2>/dev/null || echo "?")
+fi
+log "- circuit breaker after reset: \`${BRK:-clean}\`"
 log ""
 
 # ------------------------------------------------------------- beat 2 loadgen
@@ -181,6 +195,11 @@ ERR_AFTER=$(curl -sS "$DASH/state" 2>/dev/null | $PY -c "import json,sys;print(j
 LEAD_AFTER=$(curl -sS "$DASH/state" 2>/dev/null | $PY -c "import json,sys;print(json.load(sys.stdin)['leader'])" 2>/dev/null || echo "?")
 log "- leader before -> after: \`$LEAD_BEFORE\` -> \`$LEAD_AFTER\`"
 log "- **errors before -> after: $ERR_BEFORE -> $ERR_AFTER** (must be 0 -> 0)"
+# Restore the arm the drill just killed. Leaving it broken out poisons every
+# later beat AND the next run, silently.
+curl -sS -m 15 -X POST "$DASH/admin/enable" -H "Authorization: Bearer $KEY" >/dev/null 2>&1
+BRK_AFTER=$(curl -sS "$DASH/state" 2>/dev/null | $PY -c "import json,sys;print(','.join(json.load(sys.stdin).get('disabled_arms') or []))" 2>/dev/null || echo "?")
+log "- breaker restored after drill: \`${BRK_AFTER:-clean}\`"
 log ""
 
 # ------------------------------------------------------------- beat 7 demo 5

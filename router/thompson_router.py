@@ -79,6 +79,25 @@ def disabled_arms() -> frozenset[str]:
     _disabled_cache = (now, names)
     return names
 
+_breaker_warned: tuple[float, frozenset] = (0.0, frozenset())
+
+
+def _warn_breaker(excluded: list[str]) -> None:
+    """Say out loud that an arm is being withheld. Throttled to once a minute."""
+    global _breaker_warned
+    now = time.time()
+    ex = frozenset(excluded)
+    if not ex:
+        return
+    if ex == _breaker_warned[1] and now - _breaker_warned[0] < 60.0:
+        return
+    _breaker_warned = (now, ex)
+    print(f"[thompson] CIRCUIT BREAKER: withholding {sorted(ex)} from routing. "
+          f"These arms will not be sampled and their posteriors will freeze. "
+          f"Clear with POST /dash/admin/enable.", flush=True)
+    audit({"event": "breaker_active", "excluded": sorted(ex)})
+
+
 # Cold-start exploration floor.
 #
 # Without this the demo does not work, and the reason is worth stating on stage.
@@ -221,6 +240,15 @@ class ThompsonRouter(CustomRoutingStrategyBase):
         if broken:
             remaining = {k: v for k, v in healthy.items() if k not in broken}
             if remaining:
+                # A broken-out arm used to vanish from routing in total silence.
+                # The dashboard still drew it, with the posterior it had when it
+                # was switched off, so it read as "under-observed" rather than
+                # "disabled" - and a kill drill that was never reversed starved
+                # ipr-nova for a whole rehearsal while every panel looked fine.
+                # Observed: 0 selections out of 99, minobs stuck at 36, and a
+                # convergence check that reported separated=False for a reason
+                # that had nothing to do with the bandit.
+                _warn_breaker(sorted(set(healthy) - set(remaining)))
                 healthy = remaining
         if not healthy:
             # No arms left. Hand back whatever LiteLLM has so fallbacks and

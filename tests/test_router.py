@@ -268,3 +268,46 @@ def test_stratification_keeps_separate_posteriors_per_task_class(monkeypatch):
 
     monkeypatch.delenv("ROUTER_STRATIFY")
     importlib.reload(rw)
+
+
+def test_breaker_excludes_arm_and_is_visible():
+    """A broken-out arm must be withheld from routing AND reported as disabled.
+
+    The regression this locks down: kill_primary.sh writes an arm into the
+    DISABLED file, the rehearsal never cleared it, and the router then dropped
+    that arm from every selection in silence. The dashboard kept drawing it with
+    the posterior it had when it was switched off, so it read as a merely
+    under-observed arm. It cost a whole rehearsal: ipr-nova took 0 selections
+    out of 99, minobs froze at 36, and the convergence gate failed for a reason
+    that had nothing to do with the bandit.
+    """
+    import importlib
+    import tempfile
+
+    import router.state as rstate
+
+    with tempfile.TemporaryDirectory() as d:
+        os.environ["ROUTER_STATE_DIR"] = d
+        importlib.reload(rstate)
+        import dashboard.app as dash
+        importlib.reload(dash)
+
+        # Nothing disabled -> nothing reported.
+        assert dash.disabled_arms() == []
+
+        (rstate.STATE_PATH.parent).mkdir(parents=True, exist_ok=True)
+        (rstate.STATE_PATH.parent / "DISABLED").write_text("ipr-nova\nclaude-sonnet\n")
+
+        # The breaker file is what the dashboard reports, read live.
+        assert dash.disabled_arms() == ["claude-sonnet", "ipr-nova"]
+
+        # And the snapshot marks them, so a switched-off arm can never again be
+        # mistaken for one that is merely waiting for observations.
+        rstate.STATE.ensure_arms(["ipr-nova", "claude-sonnet", "nova-lite"],
+                                 rstate.GLOBAL_CLASS)
+        snap = dash.snapshot()
+        assert snap["disabled_arms"] == ["claude-sonnet", "ipr-nova"]
+        flags = {a["model"]: a["disabled"] for a in snap["arms"]}
+        assert flags["ipr-nova"] is True
+        assert flags["claude-sonnet"] is True
+        assert flags["nova-lite"] is False

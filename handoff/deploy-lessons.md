@@ -57,6 +57,54 @@ calls `litellm.embedding()` directly rather than through the Router.
 
 ---
 
+## Two more, found the day before the talk
+
+- **The circuit breaker starved an arm for an entire rehearsal, in silence.**
+  `kill_primary.sh` writes the killed arm into a `DISABLED` file. `reset_demo.sh`
+  clears it, but only at the *start* of a run - and the kill drill is the
+  second-to-last beat. So a finished run leaves the breaker dirty, and the next
+  one begins with an arm already switched off. The router then withheld
+  `ipr-nova` from every selection while the dashboard kept drawing it with the
+  posterior it had when it was killed. It read as an under-observed arm, not a
+  disabled one.
+
+  The damage: 0 selections out of 99, observations frozen at 31 while every
+  other arm climbed past 120, and a convergence check reporting
+  `separated=False minobs=36` for a reason that had nothing to do with the
+  bandit. Two rehearsals were spent tuning gamma and the exploration floor to
+  fix a arm that was simply turned off.
+
+  Fixed three ways, because one was clearly not enough: the router now prints a
+  throttled warning and writes a `breaker_active` audit event whenever it
+  withholds an arm; `/state` carries `disabled_arms` plus a per-arm `disabled`
+  flag so the panel can never again render "off" as "quiet"; and the rehearsal
+  asserts a clean breaker after the reset and restores it after the kill drill.
+
+- **Build for the architecture Fargate actually runs.** The task definition
+  is `cpuArchitecture: ARM64`. The image had always been built natively on an
+  Apple Silicon laptop, so it happened to be right. Adding `--platform
+  linux/amd64` to "be safe" broke it twice over: the legacy builder produced
+  layers ECR served but Fargate could not extract
+  (`CannotPullContainerError: wrong diff id`), and once `buildx` produced a
+  *valid* amd64 image, the task died with `exec format error` instead. Two
+  different failures, neither naming the architecture.
+
+  Colima ships no `buildx` plugin, so install it and pin the platform
+  explicitly rather than relying on the host arch:
+
+  ```bash
+  docker buildx build --platform linux/arm64 --provenance=false --push \
+    -f infra/gateway.Dockerfile -t "$REPO:$TAG" .
+  ```
+
+  Verify before deploying, because neither error message will tell you:
+
+  ```bash
+  docker buildx imagetools inspect --format '{{.Image.Platform}}' "$REPO:$TAG"
+  ```
+
+---
+
 ## The honest framing for the beat
 
 Every one of these failed **silently**. None of them threw an error that named
