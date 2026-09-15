@@ -8,6 +8,22 @@ has to survive colour blindness and a projector that eats saturation.
 
 ---
 
+## What actually got deployed, versus the plan
+
+Four things changed between the brief's architecture and the one that is
+running. All four are worth knowing before drawing slide 12.
+
+| Planned | Deployed | Why |
+|---|---|---|
+| Browser -> ALB directly | Browser -> **CloudFront** -> ALB | The ALB is http-only and the Amplify page is https. The stack's own CloudFront distribution is the https front door, and the ALB actively refuses direct access. |
+| Dashboard as a second ECS service | Dashboard **mounted on the gateway** at `/dash` | The posteriors are in-process state. Two Fargate tasks share no filesystem, so a separate service would have served an empty state forever while looking healthy. |
+| ElastiCache for Valkey + semantic cache | ElastiCache Redis, **exact-match cache only** | ElastiCache has no RediSearch. `redis-semantic` kills the gateway at startup with nothing in the logs. Demo 2 runs on the local standby. |
+| ECS autoscaling 1-2 tasks | **Pinned to exactly 1 task** | Two tasks means two independent belief states and a dashboard that alternates between them. |
+
+**The last one is slide 19 content, not a footnote.** Learn mode cannot be
+scaled horizontally, because the thing being learned lives in one process's
+memory. Snapshot mode can. The demo runs the mode that does not scale.
+
 ## Left to right
 
 ```
@@ -34,11 +50,15 @@ has to survive colour blindness and a projector that eats saturation.
           | teams, spend     |          | + valkey-search    |
           +------------------+          +--------------------+
 
-  +------------------+        SSE + JSON        +--------------------+
-  | Amplify Hosting  |<-------------------------| ECS: dashboard     |
-  | Next.js + shadcn |   browser -> ALB direct  | FastAPI data plane |
-  | (static only)    |   NOT via Next.js        | /state /spend      |
-  +------------------+                          +--------------------+
+  +------------------+                         +--------------------+
+  | Amplify Hosting  |   SSE + JSON, browser   | CloudFront (https) |
+  | Next.js + shadcn |------------------------>| -> ALB -> ECS      |
+  | STATIC export    |   never via Next.js     | /dash/state        |
+  | (no compute)     |                         | /dash/spend        |
+  +------------------+                         | /dash/stream       |
+                                               +--------------------+
+     the dashboard data plane is MOUNTED ON THE GATEWAY, not a separate
+     service - same process, same origin, so no CORS pinning is needed
 ```
 
 ---
@@ -58,7 +78,8 @@ has to survive colour blindness and a projector that eats saturation.
 | **Thompson router** | **Amber** | `self-built, conditions apply` | Production-validated *technique*, self-built *component*. Slide 19 lists the conditions |
 | **Judge loop** | **Amber** | `self-built` | The reward channel. The reason branch B exists |
 | **proxy_hook shim** | **Amber** | `self-built, undocumented seam` | The custom extension point is SDK-only; see below |
-| Dashboard data plane | **Amber** | `self-built` | Demo instrumentation, not a product |
+| Dashboard data plane | **Amber** | `self-built` | Demo instrumentation, not a product. Mounted on the gateway process |
+| CloudFront | **Green** | `official guidance` | The https front door; the ALB refuses direct access |
 | Amplify Hosting (UI) | **Green** | `managed` | Static hosting only, no live data path |
 
 **One amber cluster, and it is exactly the routing layer.** Every green box is
@@ -103,4 +124,13 @@ not as its own box. It is a seam, not a component.
 
 - ALB idle timeout **120s**, LiteLLM `KEEPALIVE_TIMEOUT` **130s**. A matched
   pair. Governs streaming completions and the dashboard SSE identically.
-- Judge sample rate **0.5** for the demo, tuned down in production.
+- Judge sample rate **0.5**, judge threshold **0.85**, gamma **0.10**. All
+  measured, not guessed - see handoff/e2e-test-report.md.
+- **Exactly one ECS task.** Not a sizing choice; a correctness one.
+
+## Verified on the deployed stack
+
+- Demo 1 through CloudFront -> ALB -> ECS -> Bedrock: 1375ms / 363ms / 725ms
+- Streaming: 24 chunks in 770ms through the ALB
+- **SSE streams through CloudFront**, first byte 0.06s, not buffered
+- Amplify page connects to `/dash/stream` and shows live state
