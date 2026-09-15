@@ -53,7 +53,23 @@ export function TrafficSplit({
               <span className="font-display text-2xl font-bold tabular">
                 {((a.requests / total) * 100).toFixed(0)}%
               </span>
-              <span className="text-xl text-muted-ink">{shortName(a.model)}</span>
+              <span
+                className={
+                  a.disabled
+                    ? "text-xl text-muted-ink line-through decoration-2"
+                    : "text-xl text-muted-ink"
+                }
+              >
+                {shortName(a.model)}
+              </span>
+              {/* A withheld arm must never read as merely quiet. It keeps its
+                  colour and position so the eye tracks it, and says why it
+                  stopped. */}
+              {a.disabled && (
+                <span className="rounded-[2px] border border-current px-2 py-0.5 font-display text-base font-bold uppercase tracking-wide text-brand-red">
+                  off
+                </span>
+              )}
             </div>
           ))}
       </div>

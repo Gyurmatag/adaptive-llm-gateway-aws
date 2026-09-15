@@ -10,6 +10,8 @@ export interface Arm {
   avg_latency_ms: number;
   cost_usd: number;
   curve: [number, number][];
+  /** Broken out of the circuit: withheld from routing, posterior frozen. */
+  disabled: boolean;
 }
 
 export interface State {
@@ -19,6 +21,8 @@ export interface State {
   gamma: number;
   shadow: boolean;
   leader: string | null;
+  /** Arms the circuit breaker is currently withholding. Usually empty. */
+  disabled_arms: string[];
   total_requests: number;
   errors: number;
   uptime_s: number;
