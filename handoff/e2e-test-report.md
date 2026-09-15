@@ -1,9 +1,15 @@
 # End-to-end test report
 
-**Gate status: PARTIALLY CLEARED.** One full run executed against the local
-stack with real measured numbers and captured output. **The two runs against
-the deployed AWS stack, one of them on the hotspot, have NOT been executed** -
-there is no AWS credential on the machine (see "What is blocked" below).
+**Gate status: PARTIALLY CLEARED.** Two full 17-minute runs executed with real
+measured numbers and captured output:
+
+- **Run 1** - local gateway, mock provider. Proves the plumbing.
+- **Run 2** - local gateway, **real Amazon Bedrock in eu-central-1**. Proves
+  the demo against the models that will actually be on stage.
+
+**Still NOT executed:** any run against the **deployed ECS stack**, the
+**hotspot** run, Demo 5 (budget key), and the fallback drill. The ECS
+deployment was in progress when this report was written.
 
 Everything below is measured, not asserted. Nothing here is simulated or
 extrapolated.
@@ -30,6 +36,120 @@ NOT exercised: Bedrock's real latency, the `bedrock/converse/` ARN route, real
 token accounting, and the ALB.
 
 ---
+
+## Run 2 - real Amazon Bedrock, eu-central-1
+
+The run that matters, because it uses the models that will be on stage.
+
+**Fleet** (all verified by invocation, not catalogue lookup):
+
+| arm | model | note |
+|---|---|---|
+| claude-sonnet | `eu.anthropic.claude-sonnet-4-5-20250929-v1:0` | EU-resident |
+| claude-haiku | `eu.anthropic.claude-haiku-4-5-20251001-v1:0` | EU-resident |
+| nova-lite | `eu.amazon.nova-lite-v1:0` | EU-resident |
+| gpt-on-bedrock | `openai.gpt-oss-120b-1:0` | OpenAI, ON_DEMAND, **region-local** |
+| ipr-nova | AWS **default** Nova prompt router ARN | via `bedrock/converse/` |
+| judge | `eu.amazon.nova-micro-v1:0` | excluded from routing |
+| embed | `amazon.titan-embed-text-v2:0` | 1024 dims |
+
+### Headline numbers
+
+| | |
+|---|---|
+| Requests | **3460** |
+| **Client-visible errors** | **0** |
+| Wall clock | 1138s |
+| Actual spend | **$1.97** |
+| Counterfactual (all on the priciest arm) | **$8.38** |
+| Saved | **76.5%** |
+| Tokens | 558,459 |
+
+### Demo 1 - three model strings, three providers
+
+```
+claude-sonnet    1395 ms   "The capital of Hungary is Budapest."
+gpt-on-bedrock    512 ms   "The capital of Hungary is Budapest."
+nova-lite         404 ms   "The capital of Hungary is Budapest."
+ipr-nova          541 ms   via the prompt router ARN
+```
+
+The `bedrock/converse/` ARN path works. Section 6.6 calls this the highest-risk
+integration point in the build; it is no longer a risk.
+
+### Demo 2 - semantic cache, real Titan embeddings
+
+| | |
+|---|---|
+| First ask | **739 ms** |
+| Reworded ask | **171 ms** |
+| Speedup | **4.3x** |
+| Header | `x-litellm-semantic-similarity: 0.9154934883118` |
+
+### Demo 4 - kill the primary
+
+| | |
+|---|---|
+| Kill switch | instant (circuit breaker file) |
+| Leader before -> after | `claude-haiku` -> `gpt-on-bedrock` |
+| **Errors before -> after** | **0 -> 0** |
+
+### Convergence - and the finding that changes the stage claim
+
+```
+leader=ipr-nova  gap=0.0111  sd_sum=0.0671  separated=False
+```
+
+Final posteriors:
+
+| arm | mean | sd | observations |
+|---|---|---|---|
+| ipr-nova | 0.879 | 0.034 | 111 |
+| nova-lite | 0.857 | 0.033 | 142 |
+| claude-haiku | 0.854 | 0.026 | 224 |
+| claude-sonnet | 0.802 | 0.041 | 120 |
+| gpt-on-bedrock | 0.685 | 0.037 | 185 |
+
+**Real models cluster far more tightly than the mock's synthetic ladder.** Four
+of the five arms sit inside 0.80-0.88, well within each other's error bars.
+Only `gpt-on-bedrock` separates cleanly, at 0.685.
+
+**What this means for the stage, stated plainly.** The "four cleanly separating
+curves" picture from the mock run is an artifact of a synthetic quality ladder
+spaced 0.10 apart. With real models on a mixed prompt pool you get **one clear
+laggard and a cluster**. That is still a router that has learned something real
+and visible - it found the weak arm and moved traffic - but do not promise four
+separating curves, because the room will be looking at the same screen you are.
+
+**The genuinely interesting result**: `claude-sonnet`, by far the most
+expensive arm, scored **0.802** - below `nova-lite` at 0.857 and below the
+managed `ipr-nova` router at 0.879. On this traffic the premium model is not
+better, which is the talk's own thesis arriving as measured data rather than
+as an assertion.
+
+### Bedrock throttling on a new account
+
+189 internal `Too many requests` in one 360-request stretch. **Every one was
+absorbed by LiteLLM's retries and fallbacks; client-visible errors stayed at
+zero.** Two consequences:
+
+1. The error counter must count client-visible failures, not attempts.
+   Counting attempts put "189 errors" on the dashboard during a run where
+   every client request succeeded - see the defect table below.
+2. Throttling, not quality, partly drives the traffic split on a new account.
+   The heavily-used arm gets cooled down and traffic lands elsewhere. Worth
+   knowing before attributing every shift on screen to the bandit.
+
+### Captures
+
+- `handoff/dashboard-real-bedrock.png` - the real-model dashboard
+
+---
+
+## Run 1 - local stack, mock provider
+
+Kept because it is the only run where the convergence *tuning* was validated
+against a known ground truth. Everything below this line is Run 1.
 
 ## Beat-by-beat, measured
 
@@ -250,6 +370,13 @@ and nothing logged an error.
 | Judge called as `litellm.acompletion(model="judge")` | Cannot resolve a router group name; failed and was swallowed |
 | Savings counter read `$0.00 actual / 100% saved` | A fabricated headline number on the largest element on screen |
 | Demo 1 and Demo 2 served from cache | Both beats showed ~19ms; Demo 2 had no contrast to show |
+| Bare Bedrock model ids rejected | "on-demand throughput isn't supported" - every Anthropic/Nova model needs an `eu.` inference profile |
+| `os.environ/VAR` does not interpolate mid-string | `bedrock/converse/os.environ/X` sent literally; Bedrock says "invalid model identifier" |
+| `tier` is a reserved `model_info` field | Any other value fails validation and LiteLLM DROPS that deployment while still starting |
+| Default Anthropic prompt router is EOL in eu-central-1 | Listing reports it healthy; only invoking reveals it |
+| `REDIS_NUM_CACHE_CLUSTERS=1` fails at plan time | Coupled to a hard-coded `automatic_failover_enabled` the module does not expose |
+| Error counter counted attempts, not client errors | 189 "errors" during a run where all 360 client requests succeeded |
+| Fallback-served deployments became junk arms | A flat posterior stretched the dashboard x-axis to 0..1 |
 | Snapshot mode fell back to the live bandit in silence | Deterministic serving requested, self-modifying policy delivered |
 | Three curve labels overlapped | Read as "GP-IPRnova-et" on the projector check |
 | Savings counter clipped at fixed font size | Headline number cut off at narrower widths |
