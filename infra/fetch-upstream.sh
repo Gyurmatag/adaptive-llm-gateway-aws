@@ -22,6 +22,9 @@ fi
 # Bake this repo's router into the gateway image and hand the upstream stack
 # our model fleet. Both are copied on every fetch so an upstream update cannot
 # silently drop them.
+echo "==> applying required patches to the fetched guidance"
+python3 patch-upstream.py
+
 echo "==> layering the custom router into the gateway image"
 cp gateway.Dockerfile upstream/Dockerfile
 mkdir -p upstream/config

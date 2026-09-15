@@ -182,7 +182,48 @@ routing layer that cannot prove it is learning is indistinguishable from one
 that is. That is the argument for the audit log and for shadow mode, made the
 hard way.
 
-### 6. Streaming and the ALB idle timeout
+### 6. The official AWS guidance no longer deploys on a new account
+
+The single most surprising failure, and the one most worth a sentence on stage.
+
+```
+Error: creating AWS Service Catalog AppRegistry Application (...):
+api error AccessDeniedException: AWS Service Catalog AppRegistry is in
+maintenance mode and is no longer available to new customers as of
+July 30, 2026.
+```
+
+The guidance creates a Service Catalog AppRegistry application to track the
+solution's resources. That service stopped accepting new customers on
+30 July 2026, so on any account created after that date the official AWS
+Terraform fails at apply time. Nothing else in the stack references the
+resource - it is pure solution-tracking metadata - so `infra/patch-upstream.py`
+removes it.
+
+**Why this is a patch script and not a hand edit:** `infra/upstream/` is
+fetched, so a manual change is silently lost on the next fetch and takes the
+deployment with it. `fetch-upstream.sh` runs the patcher every time.
+
+*Worth saying out loud, because it is the talk's own argument turning on
+itself: "deploy, don't build" is right, and the thing you deploy still rots.
+Official guidance is a starting point with a maintenance burden, not a
+guarantee.*
+
+### 7. Transient DNS failures mid-apply
+
+```
+Error: creating S3 Bucket (...): request send failed,
+  dial tcp: lookup ...s3.eu-central-1.amazonaws.com: no such host
+Error: creating Secrets Manager Secret (...): request send failed,
+  dial tcp: lookup secretsmanager.eu-central-1.amazonaws.com: no such host
+```
+
+Local DNS, not AWS. Terraform surfaces it as a resource creation error, which
+reads like a permissions or naming problem. Re-running the apply cleared it.
+Worth knowing before debugging the wrong layer - and worth remembering on a
+conference network.
+
+### 8. Streaming and the ALB idle timeout
 
 LiteLLM warns to keep `KEEPALIVE_TIMEOUT` **above** the load balancer idle
 timeout or streams get cut mid-flight. These are a matched pair:
