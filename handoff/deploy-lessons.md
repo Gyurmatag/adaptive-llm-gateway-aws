@@ -117,6 +117,40 @@ calls `litellm.embedding()` directly rather than through the Router.
 
 ---
 
+## Checked against LiteLLM's own production checklist, the day before
+
+Worth doing, because two of these were live defects rather than polish.
+docs.litellm.ai/docs/proxy/prod
+
+- **`LITELLM_LOG=DEBUG` in production.** The guidance ships it and nobody
+  changes it. Every request wrote several `LiteLLM Router:DEBUG` lines to
+  CloudWatch - that is ingestion you pay for, and it buries the one line that
+  matters. Set to `ERROR`: log volume went from hundreds of lines a minute to
+  **31 events in three minutes**.
+
+- **`redis_password` was missing from `router_settings`.** ElastiCache has auth
+  on and the task already receives `REDIS_PASSWORD`, but the router block only
+  carried host and port - so LiteLLM's cooldown and usage tracking could not
+  reach Redis and silently fell back to per-process memory. On one task that
+  works, which is why it went unnoticed; on two it would have given two
+  independent views of which deployment was in cooldown.
+
+Five more from the same page, all now set: `proxy_batch_write_at: 60` so spend
+writes batch instead of one per request, `disable_error_logs: true` to keep
+provider exceptions out of the billing tables, `database_connection_pool_limit`,
+`allow_requests_on_db_unavailable: true` so a Postgres blip mid-talk does not
+take the gateway with it, plus `json_logs: true` and `request_timeout: 600`
+against a documented default of 6000 seconds.
+
+**The algorithm was checked too.** `score = theta / cost^gamma` is Budgeted
+Thompson Sampling (arXiv:1505.00146) with a softening exponent: at gamma = 1 it
+is exactly the textbook posterior-sample-over-cost ratio. The one deliberate
+departure is that the canonical version samples cost from a posterior as well,
+because it assumes stochastic costs - here per-token prices are known exactly,
+so sampling them would add variance for nothing.
+
+---
+
 ## The honest framing for the beat
 
 Every one of these failed **silently**. None of them threw an error that named
