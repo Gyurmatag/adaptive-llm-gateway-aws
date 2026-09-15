@@ -90,16 +90,30 @@ def _persist(force: bool = False) -> None:
         pass
 
 
+# Live subscribers to the audit stream, set by the dashboard at import.
+#
+# The dashboard runs inside this same process (proxy_hook mounts it), so a
+# decision can be handed straight to an open browser connection instead of
+# anyone re-reading the file. Nothing polls anything.
+AUDIT_SINK = None
+
+
 def audit(event: dict) -> None:
     """Append-only audit log of every routing decision and its reason.
 
     'The router changed its mind' is not an answer for a risk committee.
     Slide 19, point 4.
     """
+    row = {"ts": time.time(), **event}
+    if AUDIT_SINK is not None:
+        try:
+            AUDIT_SINK(row)
+        except Exception:  # noqa: BLE001 - a watching browser must never
+            pass          # break the request path
     try:
         os.makedirs(os.path.dirname(_AUDIT_PATH), exist_ok=True)
         with open(_AUDIT_PATH, "a") as fh:
-            fh.write(json.dumps({"ts": time.time(), **event}) + "\n")
+            fh.write(json.dumps(row) + "\n")
     except OSError:
         # Audit logging must never take the request path down.
         pass

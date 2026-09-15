@@ -5,6 +5,8 @@ import { Chat } from "@/components/Chat";
 import { DemoFanout, DemoCache, DemoKill, DemoBudget } from "@/components/Demos";
 import { Decisions } from "@/components/Decisions";
 import { Guardrails } from "@/components/Guardrails";
+import { TrafficControl } from "@/components/TrafficControl";
+import { LiveLog } from "@/components/LiveLog";
 import { Stat } from "@/components/ui";
 import { api } from "@/lib/base";
 
@@ -69,6 +71,16 @@ export default function Page() {
               : `The gateway is withholding ${withheld.join(", ")} after network trouble. It clears itself.`}
         </p>
       )}
+
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+        <TrafficControl onChange={refresh} />
+      </div>
+
+      {/* The log is not behind a tab. Whatever the speaker is showing, the
+          decisions are visible underneath it. */}
+      <div className="mt-4">
+        <LiveLog />
+      </div>
 
       <nav className="mt-7 flex flex-wrap gap-1.5 border-b border-rule pb-3">
         {TABS.map((t) => (

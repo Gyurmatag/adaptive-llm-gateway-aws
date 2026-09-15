@@ -337,6 +337,63 @@ def _tail_jsonl(path: Path, limit: int) -> list[dict]:
     return out
 
 
+# --------------------------------------------------------------- live audit
+#
+# Subscribers are plain asyncio queues. router.rewards.audit() hands each
+# decision straight to them as it is written, so a browser sees a routing
+# decision in the same millisecond the router made it - no file re-reads, no
+# interval, nothing to tune.
+_AUDIT_SUBS: set[asyncio.Queue] = set()
+
+
+def _publish_audit(row: dict) -> None:
+    """Called from the router's request path. Must never block or raise."""
+    for q in list(_AUDIT_SUBS):
+        try:
+            q.put_nowait(row)
+        except asyncio.QueueFull:
+            pass          # a slow reader loses lines, never the request path
+
+
+try:
+    from router import rewards as _rewards
+    _rewards.AUDIT_SINK = _publish_audit
+except Exception:  # noqa: BLE001 - litellm may be absent in tests
+    pass
+
+
+@app.get("/audit/stream")
+async def audit_stream():
+    """Server-Sent Events, pushed at the moment of the decision."""
+    q: asyncio.Queue = asyncio.Queue(maxsize=500)
+    _AUDIT_SUBS.add(q)
+
+    async def gen():
+        try:
+            # Seed with recent history so a panel is never blank on connect.
+            path = Path(os.environ.get("ROUTER_AUDIT_PATH",
+                                       str(STATE_PATH.parent / "audit.jsonl")))
+            seed = _tail_jsonl(path, 40)
+            if seed:
+                yield f"data: {json.dumps({'type': 'entries', 'entries': seed})}\n\n"
+            while True:
+                try:
+                    row = await asyncio.wait_for(q.get(), timeout=15.0)
+                    yield f"data: {json.dumps({'type': 'entries', 'entries': [row]})}\n\n"
+                except TimeoutError:
+                    # The ALB counts silence. A comment keeps the stream open
+                    # without inventing an event.
+                    yield ": keepalive\n\n"
+        finally:
+            _AUDIT_SUBS.discard(q)
+
+    return StreamingResponse(gen(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache, no-transform",
+        "X-Accel-Buffering": "no",
+        "Connection": "keep-alive",
+    })
+
+
 @app.get("/audit")
 async def get_audit(limit: int = 60, event: str | None = None):
     """Every routing decision and why it was made.
