@@ -32,6 +32,9 @@ next-env.d.ts
 
 # captured router state containing real spend
 router/state/*.json
+router/state/*.jsonl
+router/state/RESET
+router/state/DISABLED
 !router/state/.gitkeep
 loadgen/results/
 
