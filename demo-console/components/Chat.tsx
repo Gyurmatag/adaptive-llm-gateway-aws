@@ -4,6 +4,7 @@ import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import { useState } from "react";
 import { Panel, Button, Label } from "./ui";
+import { Explain } from "./Explain";
 import { api } from "@/lib/base";
 
 const MODELS = [
@@ -35,6 +36,11 @@ export function Chat() {
 
   return (
     <div className="flex flex-col gap-4">
+      <Explain title="Try it yourself">
+        <p>Ask anything. Then press a different model button and ask again.</p>
+        <p>Nothing about the request changes — only which model picks it up. Leave it on
+        <b> Adaptive router</b> and the gateway chooses for you.</p>
+      </Explain>
       <div className="flex flex-wrap items-center gap-2">
         <Label>Answering</Label>
         <div className="flex flex-wrap gap-1.5">

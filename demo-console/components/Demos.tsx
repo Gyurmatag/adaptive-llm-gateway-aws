@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Panel, Button, Label, Stat } from "./ui";
+import { Explain } from "./Explain";
 import { api } from "@/lib/base";
 
 type Fan = { model: string; ok: boolean; ms: number; text: string; servedBy: string | null };
@@ -24,6 +25,10 @@ export function DemoFanout() {
     <section className="flex flex-col gap-4">
       <Header n="Demo 1" title="One endpoint, every model"
         blurb="The same request, the same shape, three different vendors. Nothing in the application code knows which one answered." />
+      <Explain title="What you are about to see">
+        <p>The same question goes to three companies&rsquo; models — Anthropic, Amazon and OpenAI.</p>
+        <p>One address, one request, three vendors. The app never knows which one answered.</p>
+      </Explain>
       <p className="rounded-sm border border-rule bg-warm-gray px-4 py-3 font-mono text-[13px] text-navy">{prompt}</p>
       <div><Button onClick={run} disabled={busy}>{busy ? "Asking all three…" : "Ask all three"}</Button></div>
       {rows && (
@@ -64,6 +69,12 @@ export function DemoCache() {
     <section className="flex flex-col gap-4">
       <Header n="Demo 2" title="The semantic cache"
         blurb="Ask it cold, then ask the same thing in different words. A meaning match, not a string match - no tokens, no routing decision, no spend." />
+      <Explain title="What you are about to see">
+        <p>We ask a question, then ask <b>the same thing in different words</b>.</p>
+        <p>The second one comes back in a fraction of the time — because the gateway recognised
+        it <i>means</i> the same thing and reused the first answer.</p>
+        <p>No model was called. Nothing was billed. Watch the two numbers underneath.</p>
+      </Explain>
       <div className="flex flex-wrap items-center gap-2">
         <Label>Country</Label>
         <input
@@ -131,6 +142,12 @@ export function DemoKill({ onChange }: { onChange: () => void }) {
     <section className="flex flex-col gap-4">
       <Header n="Demo 4" title="Kill the primary"
         blurb="Take out the model taking most of the traffic, then say nothing for thirty seconds and let them watch the error counter refuse to move." />
+      <Explain title="What you are about to see">
+        <p>We switch off whichever model is currently doing most of the work.</p>
+        <p>Traffic moves to the others within seconds — and the <b>failed answers</b> counter at the
+        top of the screen never leaves zero.</p>
+        <p>Nobody using the app would notice anything happened.</p>
+      </Explain>
       <div className="flex flex-wrap gap-2">
         {arms.map((a) => (
           <Button key={a} tone="danger" disabled={busy} onClick={() => act("disable", a)}>Kill {a}</Button>
@@ -163,6 +180,11 @@ export function DemoBudget() {
     <section className="flex flex-col gap-4">
       <Header n="Demo 5" title="The budget key"
         blurb="A virtual key with a ceiling of a fraction of a cent, spent live until the gateway refuses it." />
+      <Explain title="What you are about to see">
+        <p>We create an API key with a spending limit of two hundredths of a cent, then spend it.</p>
+        <p>After a handful of questions the gateway simply refuses it. That is a budget being
+        enforced, not an outage — and it is per key, so one team cannot spend another&rsquo;s money.</p>
+      </Explain>
       <div><Button onClick={run} disabled={busy}>{busy ? "Spending it…" : "Mint a $0.0002 key and spend it"}</Button></div>
       {res && (
         <Panel className="p-5">

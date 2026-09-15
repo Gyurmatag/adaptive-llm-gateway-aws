@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Panel, Label } from "./ui";
 import { useAuditStream } from "@/lib/useAudit";
 import { describeEntry, kindOf } from "@/lib/describe";
+import { Explain } from "./Explain";
 
 export function Decisions() {
   const [live, setLive] = useState(true);
@@ -33,6 +34,13 @@ export function Decisions() {
         </p>
       </div>
 
+      <Explain title="Reading this log">
+        <p><b>ROUTE</b> — the gateway chose a model, and why it chose that one.</p>
+        <p><b>REWARD</b> — a grader scored an answer out of 1. That score is what moves the
+        model&rsquo;s standing up or down. This is the learning, happening in front of you.</p>
+        <p>Watch one model consistently score lower than the rest: that is the one the gateway
+        is quietly walking away from.</p>
+      </Explain>
       <div className="flex flex-wrap items-center gap-2">
         {(["all", "route", "reward"] as const).map((k) => (
           <button key={k} type="button" onClick={() => setOnly(k)}

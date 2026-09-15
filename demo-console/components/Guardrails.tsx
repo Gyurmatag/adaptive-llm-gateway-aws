@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Panel, Button, Label } from "./ui";
 import { api } from "@/lib/base";
+import { Explain } from "./Explain";
 
 type G = Record<string, any>;
 
@@ -52,6 +53,15 @@ export function Guardrails() {
           acceptable — and every one of them is live, not a slide.
         </p>
       </div>
+
+      <Explain title="Why a bank would ask for all this">
+        <p>Something that learns changes its own behaviour — and an auditor cannot sign off on
+        &ldquo;it decided differently today&rdquo;.</p>
+        <p>So: you can <b>freeze</b> it, so the same question always goes the same way. You can
+        <b> switch any model off</b> by hand. Every decision is <b>written down with its reason
+        and its cost</b>. And it is never allowed to pick a cheap model that is below the
+        quality line you set.</p>
+      </Explain>
 
       {/* 1. take the learning out of production */}
       <Panel className="p-5">

@@ -7,6 +7,7 @@ import { Decisions } from "@/components/Decisions";
 import { Guardrails } from "@/components/Guardrails";
 import { TrafficControl } from "@/components/TrafficControl";
 import { LiveLog } from "@/components/LiveLog";
+import { HowItDecides } from "@/components/Explain";
 import { Stat } from "@/components/ui";
 import { api } from "@/lib/base";
 
@@ -55,11 +56,11 @@ export default function Page() {
       {/* Live strip. The same numbers as the projector, so the speaker never
           has to turn around to check the state of the stack. */}
       <div className="mt-5 flex flex-wrap items-center gap-x-10 gap-y-5 rounded-sm border border-rule bg-panel px-5 py-4">
-        <Stat value={offline ? "–" : s.total_requests.toLocaleString()} label="Requests" />
-        <Stat value={offline ? "–" : s.errors} label="Errors" tone={!offline && s.errors === 0 ? "good" : "red"} />
-        <Stat value={sp ? `$${sp.saved_usd.toFixed(2)}` : "–"} label="Saved" tone="red" />
-        <Stat value={sp ? `${sp.saved_pct.toFixed(0)}%` : "–"} label="Cheaper" />
-        <Stat value={offline ? "–" : (s.leader ?? "–")} label="Taking traffic" />
+        <Stat value={offline ? "–" : s.total_requests.toLocaleString()} label="Questions asked" />
+        <Stat value={offline ? "–" : s.errors} label="Failed answers" tone={!offline && s.errors === 0 ? "good" : "red"} />
+        <Stat value={sp ? `$${sp.saved_usd.toFixed(2)}` : "–"} label="Saved so far" tone="red" />
+        <Stat value={sp ? `${sp.saved_pct.toFixed(0)}%` : "–"} label="Cheaper than always-biggest" />
+        <Stat value={offline ? "–" : (s.leader ?? "–")} label="Winning right now" />
       </div>
 
       {(broken.length > 0 || withheld.length > 0 || offline) && (
@@ -72,7 +73,16 @@ export default function Page() {
         </p>
       )}
 
-      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+      <p className="mt-2 text-[13.5px] text-muted-ink">
+        &ldquo;Saved&rdquo; compares what this actually cost against sending every single question to
+        the most expensive model.
+      </p>
+
+      <div className="mt-5">
+        <HowItDecides />
+      </div>
+
+      <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
         <TrafficControl onChange={refresh} />
       </div>
 
