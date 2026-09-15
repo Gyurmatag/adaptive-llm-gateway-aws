@@ -41,7 +41,21 @@ hundred dollars a month. For a demo that runs for days, override:
 | `DESIRED_CAPACITY` / `MIN_CAPACITY` | 2 / 2 | 1 / 1 | Stage load is ~3 req/s |
 | `ECS_VCPUS` | 2 | 1 | Not 3000 req/s |
 | `RDS_INSTANCE_CLASS` | db.t3.small | db.t4g.micro | Keys and spend rows only |
-| `REDIS_NUM_CACHE_CLUSTERS` | 2 | 1 | A replica protects nothing here |
+| `REDIS_NUM_CACHE_CLUSTERS` | 2 | **2 - cannot be lowered** | See below |
+
+**`REDIS_NUM_CACHE_CLUSTERS` cannot actually be lowered.** Setting the
+documented cost knob to 1 fails at plan time:
+
+```
+Error: "num_cache_clusters": must be at least 2 if automatic_failover_enabled is true
+  with module.base.aws_elasticache_replication_group.redis,
+  on modules/base/redis.tf line 54
+```
+
+The knob and the module's hard-coded `automatic_failover_enabled = true` are
+coupled, and the module does not expose the failover flag. Either run two cache
+nodes or patch the module. Two `cache.t4g.micro` nodes is the cheaper answer
+than a local fork for a short-lived demo.
 
 The sleeper cost is **NAT gateways**, roughly 32 USD/month each before data
 charges, and the VPC pattern creates one per AZ. Check how many you got.

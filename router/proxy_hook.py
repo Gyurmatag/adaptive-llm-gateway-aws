@@ -54,6 +54,8 @@ class ThompsonInstaller(CustomLogger):
         super().__init__()
         self.installed = False
         self.strategy: ThompsonRouter | None = None
+        # Deployment ids that belong to the bandit's own group.
+        self.group_arms: frozenset[str] = frozenset()
         self._thread: threading.Thread | None = None
         self._start()
 
@@ -150,6 +152,22 @@ class ThompsonInstaller(CustomLogger):
         except (AttributeError, TypeError, ValueError):
             pass
 
+        # Which deployment ids are actually arms of the bandit's group.
+        #
+        # A fallback re-enters the router with the SUCCESSOR's model_name, and
+        # the response then reports the direct deployment that served it - so
+        # "demo-router falls back to claude-haiku" produced a posterior called
+        # `direct-claude-haiku` that never received a reward and drew a
+        # permanent flat curve on the dashboard. Only group members learn.
+        try:
+            self.group_arms = frozenset(
+                (d.get("model_info") or {}).get("id")
+                for d in (router.model_list or [])
+                if d.get("model_name") == ROUTER_GROUP
+                and (d.get("model_info") or {}).get("id"))
+        except (AttributeError, TypeError):
+            self.group_arms = frozenset()
+
         # The judge is a Router deployment, so the reward path needs the Router.
         try:
             from router import rewards as _rw
@@ -233,6 +251,10 @@ class ThompsonInstaller(CustomLogger):
         from router import rewards
 
         arm = self._arm_of(response, kwargs)
+        # A fallback may have served this from a deployment outside the group.
+        # The request still succeeded - it just teaches the bandit nothing.
+        if self.group_arms and arm not in self.group_arms:
+            return
         messages = kwargs.get("messages") or []
         question = str(messages[-1].get("content", "")) if messages else ""
         try:
