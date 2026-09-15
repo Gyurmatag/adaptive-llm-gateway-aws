@@ -223,7 +223,30 @@ reads like a permissions or naming problem. Re-running the apply cleared it.
 Worth knowing before debugging the wrong layer - and worth remembering on a
 conference network.
 
-### 8. Streaming and the ALB idle timeout
+### 8. The budget block is a 400, not a 429
+
+Virtual key budgets are enforced, but the response is:
+
+```json
+{"error": {"message": "Budget has been exceeded! Current cost: 0.00080844, Max budget: 0.0008",
+           "type": "budget_exceeded", "code": "400"}}
+```
+
+**HTTP 400 with `type: budget_exceeded`.** The talk plan says the key "starts
+returning 429". It does not. Saying 429 from the stage would be contradicted by
+the screen behind you.
+
+Also worth knowing before choosing a number: measured cost on this fleet is
+roughly **$0.000046 per request**, so a literal $5 budget needs about 100,000
+requests. A stage-usable budget is a few ten-thousandths of a dollar. Frame it
+as "a key with a small budget", not "a $5 key", unless the key has been
+accumulating spend since minute 2.
+
+Spend tracking is also slightly behind enforcement: the key showed
+`spend=0.000642` against `max_budget=0.0008` on the request that was blocked,
+because the blocking check uses a more current figure than `/key/info` reports.
+
+### 9. Streaming and the ALB idle timeout
 
 LiteLLM warns to keep `KEEPALIVE_TIMEOUT` **above** the load balancer idle
 timeout or streams get cut mid-flight. These are a matched pair:

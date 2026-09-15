@@ -180,18 +180,41 @@ log ""
 
 # ------------------------------------------------------------- beat 7 demo 5
 log "## Beat 7 - Demo 5: budget key hits its ceiling"
+# NOTE: LiteLLM returns HTTP 400 with type "budget_exceeded", NOT 429. The talk
+# plan says 429; do not say that on stage, the screen will contradict you.
 BK="${BUDGET_KEY:-}"
+if [ -z "$BK" ]; then
+  BK="$(curl -sS -X POST "$BASE/key/generate" -H "Authorization: Bearer $KEY" \
+        -H 'Content-Type: application/json' \
+        -d "{\"key_alias\":\"demo-budget-key-$(date +%s)\",\"max_budget\":${BUDGET_USD:-0.0005},\"models\":[\"${LOADGEN_MODEL:-demo-router}\"]}" 2>/dev/null \
+        | $PY -c "import json,sys;print(json.load(sys.stdin).get('key',''))" 2>/dev/null)"
+fi
 if [ -n "$BK" ]; then
-  CODE=""; N=0
-  while [ "$N" -lt 400 ] && [ "$CODE" != "429" ]; do
-    CODE=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$BASE/v1/chat/completions" \
+  B=$(date +%s); N=0; CODE=200; BODY=""
+  while [ "$N" -lt 300 ] && [ "$CODE" = "200" ]; do
+    CODE=$(curl -sS -o /tmp/bk_resp.json -w '%{http_code}' -X POST "$BASE/v1/chat/completions" \
       -H "Authorization: Bearer $BK" -H 'Content-Type: application/json' \
-      -d '{"model":"demo-router","messages":[{"role":"user","content":"hi"}],"max_tokens":200}' 2>/dev/null)
+      -d "{\"model\":\"${LOADGEN_MODEL:-demo-router}\",\"messages\":[{\"role\":\"user\",\"content\":\"Write three sentences about databases.\"}],\"max_tokens\":300,\"cache\":{\"no-cache\":true}}" 2>/dev/null)
     N=$((N+1))
   done
-  log "- budget key returned \`$CODE\` after $N requests, t+$(el)s"
+  BODY=$($PY -c "
+import json
+try:
+    d=json.load(open('/tmp/bk_resp.json'))
+    e=d.get('error') or {}
+    print('%s | %s' % (e.get('type','?'), (e.get('message') or '')[:160]))
+except Exception: print('(unparseable)')" 2>/dev/null)
+  log "- blocked with HTTP \`$CODE\` after $N requests, $(( $(date +%s) - B ))s"
+  log "- error type and message:"
+  log "  \`\`\`"
+  log "  $BODY"
+  log "  \`\`\`"
+  if [ "$CODE" = "400" ]; then
+    log "- **NOTE: this is a 400 \`budget_exceeded\`, NOT a 429.** The talk plan"
+    log "  says 429. Do not say 429 on stage."
+  fi
 else
-  log "- **SKIPPED**: BUDGET_KEY not set. Create it with infra/bootstrap.sh."
+  log "- **SKIPPED**: could not create a budget key."
 fi
 log ""
 
