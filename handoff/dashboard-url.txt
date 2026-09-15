@@ -1,6 +1,16 @@
 https://main.d2pprg16lxvrri.amplifyapp.com
 
-STATUS: LIVE. Verified HTTP 200 and serving the branded dashboard.
+STATUS: LIVE AND CONNECTED TO THE DEPLOYED STACK.
+
+Verified: HTTP 200, serving the branded dashboard, SSE connected through
+CloudFront to the gateway on ECS, showing live posteriors and spend.
+Captured proof: handoff/dashboard-deployed.png (1300 requests, $2.29 saved,
+0 errors, five separated curves).
+
+Data plane origin: https://<cloudfront-domain>/dash
+The dashboard endpoints are mounted ON THE GATEWAY process, not a separate
+service - the posteriors are in-process state that a second Fargate task
+cannot read. Same origin as the gateway, so no CORS pinning is needed.
 
 Hosting: AWS Amplify Hosting, app "awsday-gateway-dashboard", branch "main",
 region eu-central-1. Deployed by MANUAL (zip) deployment, not a GitHub
@@ -22,9 +32,11 @@ REBUILD REQUIRED when the data plane URL changes:
 NEXT_PUBLIC_* is inlined at BUILD time, so changing the origin needs a
 rebuild, not just a redeploy.
 
-OPEN ITEM - the data plane origin must be HTTPS.
-An https Amplify page cannot fetch an http origin; the browser blocks it as
-mixed content. The upstream ALB is http-only, so the data plane has to be
-reached through the stack's CloudFront distribution (https) rather than the
-ALB directly. Note that CloudFront must be configured with caching DISABLED
-on the SSE path or it will buffer the stream.
+RESOLVED - the data plane origin is HTTPS via CloudFront.
+An https Amplify page cannot fetch the http-only ALB; the browser blocks it as
+mixed content. The stack's own CloudFront distribution is the https front door
+and the ALB actively refuses direct access.
+
+SSE through CloudFront was the open risk and it is CLEAR: measured first byte
+at 0.06s with update frames arriving continuously, not buffered. The
+distribution's TTLs are already 0, so no cache policy change was needed.
