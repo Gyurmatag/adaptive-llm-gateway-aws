@@ -1,17 +1,28 @@
 #!/usr/bin/env python3
 """Generate the DEPLOYED gateway config from config/config.yaml.
 
-One transform: `redis-semantic` becomes plain `redis`.
+One transform: the semantic cache is repointed from ElastiCache to a Redis
+Stack SIDECAR running inside the same ECS task, reachable on localhost.
 
 LiteLLM's semantic cache goes through redisvl, which needs the RediSearch
-command set. ElastiCache does not provide it - not on Redis OSS, and not on
-Valkey unless the search module is enabled on the engine version. The failure
-is not graceful: the gateway dies during startup immediately after logging
-"passed cache type=redis-semantic", writes no error to the task log at all,
-and the ECS task then cycles forever while the load balancer serves 502.
+command set. ElastiCache does not provide it - not on Redis OSS (this stack
+runs 7.1.0), and not on Valkey unless the search module is enabled on the
+engine version. The failure is not graceful: the gateway dies during startup
+immediately after logging "passed cache type=redis-semantic", writes no error
+to the task log at all, and the ECS task then cycles forever while the load
+balancer serves 502.
 
-The local standby runs Redis Stack, which does have RediSearch, so the
-semantic cache demo (Demo 2) still works there. See infra/DEPLOY.md.
+This used to degrade to plain `redis`, which meant Demo 2 silently did not work
+on the deployed stack: repeating a question hit an exact-match cache, but
+REWORDING it - the whole point of the demo - missed every time and no
+x-litellm-semantic-similarity header was ever returned. Measured on the
+deployed URL: same question 0.738s -> 0.068s, reworded question 1.105s and a
+cache miss.
+
+So the task now runs `redis/redis-stack-server` as a sidecar. The gateway
+reaches it on localhost:6379 with no password and no TLS, which is also the
+shape redisvl wants. ElastiCache is still used for everything else LiteLLM
+needs Redis for - router cooldowns, spend tracking - via router_settings.
 """
 from __future__ import annotations
 
@@ -25,25 +36,27 @@ DST = HERE / "upstream" / "config" / "config.yaml"
 
 REPLACEMENT = """  cache: true
   cache_params:
-    # Plain `redis`, NOT `redis-semantic`.
+    # redis-semantic against the Redis Stack SIDECAR in this task, not against
+    # ElastiCache. ElastiCache for Redis OSS has no RediSearch, and pointing
+    # redisvl at it kills the gateway during startup with nothing in the log.
     #
-    # ElastiCache has no RediSearch, which redisvl requires, and the failure
-    # takes the whole gateway down during startup with nothing in the logs.
-    # Exact-match caching still works; semantic matching does not. The local
-    # standby runs Redis Stack and keeps the semantic cache.
-    #
-    # host/port/password, NOT redis_url: the guidance's ECS task definition
-    # sets REDIS_HOST, REDIS_PORT, REDIS_PASSWORD and REDIS_SSL - there is no
-    # REDIS_URL, so `redis_url: os.environ/REDIS_URL` resolves to nothing and
-    # the gateway dies in get_redis_client(). The local compose stack is the
-    # opposite: redis_url is required there because redisvl rejects
-    # host/port without a password. The two environments genuinely need
-    # different cache wiring.
-    type: redis
-    host: os.environ/REDIS_HOST
-    port: os.environ/REDIS_PORT
-    password: os.environ/REDIS_PASSWORD
+    # Demo 2 needs REWORDED questions to hit. Plain `redis` only matches
+    # identical strings, so the demo looked fine when you repeated a question
+    # and silently failed the moment you rephrased one.
+    type: redis-semantic
+    # localhost: the sidecar shares the task's network namespace. No password
+    # and no TLS, which is what redisvl wants - host/port without a password
+    # makes it raise "Missing required Redis configuration: REDIS_PASSWORD".
+    # Nothing outside the task can reach it.
+    redis_url: redis://localhost:6379
+    similarity_threshold: 0.85
     ttl: 900
+    # A PROVIDER-QUALIFIED embedding model, not a model_list group name: the
+    # semantic cache calls litellm.embedding() directly rather than going
+    # through the Router, so a group name fails with "LLM Provider NOT
+    # provided" and the gateway does not start.
+    redis_semantic_cache_embedding_model: bedrock/amazon.titan-embed-text-v2:0
+    semantic_cache_scope: end_user
 """
 
 
