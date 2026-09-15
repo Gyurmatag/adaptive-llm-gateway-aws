@@ -1,8 +1,10 @@
 # Branch decision: the four-question test
 
 **Decided:** 14 September 2026
-**Outcome:** **Branch B** - custom Thompson sampling strategy via `CustomRoutingStrategyBase`,
-with LiteLLM's built-in adaptive router shipped alongside it, configured and switchable on stage.
+**Outcome:** **Branch B** - custom Thompson sampling strategy via `CustomRoutingStrategyBase`.
+**Corrected 15 September 2026:** the built-in adaptive router is *not* configured alongside it and
+cannot be switched to on stage. It does not exist in the LiteLLM version this architecture pins.
+See "The version gate" below - this makes the slide 16 beat stronger, not weaker.
 **Deciding question:** question 2 (reward signal). Questions 1, 3 and 4 all came back **yes**.
 
 ---
@@ -30,7 +32,9 @@ built-in option honestly. The correction matters more than the branch.
 
 ### Q1. Can it run from proxy YAML, or is it SDK-only?
 
-**YES - proxy YAML.** Configured entirely in `config.yaml`; no SDK required.
+**YES - proxy YAML, but only from v1.94.x.** Configured entirely in `config.yaml`; no SDK
+required. Section 8 of the brief is stale in general - and still unusable here, because of the
+version gate documented below.
 
 ```yaml
 model_list:
@@ -144,12 +148,68 @@ Both routers ship in this repo and both are reachable from `config/config.yaml`.
 
 - `router/thompson_router.py` - the custom `CustomRoutingStrategyBase` strategy, serving the demo.
   It exists because it accepts a judge score as reward. That is the whole reason.
-- The built-in adaptive router - configured as a live model group, switchable mid-talk. Slide 16
-  asks for "show it being switched on", so it has to genuinely work, not be a screenshot.
+- The built-in adaptive router - **not configured, and deliberately so.** Slide 16 asks for "show
+  it being switched on". It cannot be shown, and the reason is the most interesting thing on the
+  slide. See "The version gate" immediately below.
 
 The custom code is deliberately small. Provider adapters, retries, cooldowns, fallbacks, rate-limit
 awareness and spend tracking all still come from LiteLLM. The extension point is supported API,
 not a fork.
+
+---
+
+## The version gate - verified 15 September 2026, against the running image
+
+**The built-in adaptive router is not in the LiteLLM this architecture runs.** This was found by
+introspecting the deployed image rather than by reading release notes:
+
+```
+$ grep -ril 'adaptive_router' /app/litellm/
+(no matches)
+
+$ ls /app/litellm/router_strategy/auto_router/
+auto_router.py   litellm_encoder.py
+```
+
+The `auto_router` that *does* exist in this version is the **semantic** router - it embeds the
+prompt and picks a route with the `semantic_router` library, taking `default_model` and
+`embedding_model`. It is not a bandit and it has no cost term. There is no
+`adaptive_router_config`, no `weights: {quality, cost}`, no `/adaptive_router/{name}/state`
+endpoint and no `x-litellm-adaptive-router-model` header anywhere in the image.
+
+| | |
+|---|---|
+| Adaptive router ships in | **v1.94.x** (beta) |
+| This stack runs | **`main-v1.82.3-stable.patch.2`** |
+| Who chose that pin | **The AWS guidance**, in `infra/upstream/.env` - not us |
+
+**This is the beat, and it is better than a live switch.** The honest line is: *the built-in
+adaptive router is real, it is proxy-configurable, and it is twelve minor versions newer than the
+one the AWS reference architecture pins.* If you deploy the guidance as published, you do not have
+it. That is a far more useful thing to tell a room of architects than watching a feature toggle.
+
+### And a second finding, for the same beat
+
+Even on a version that has it, check this before believing the cost dial does anything.
+[Issue #31481](https://github.com/BerriAI/litellm/issues/31481): the adaptive router reads
+per-model cost from `litellm_params.input_cost_per_token` and **not** from `model_info` - which is
+the documented, conventional place for it everywhere else in LiteLLM. The failure is silent. The
+state endpoint returns an empty `model_costs` map, every model scores an identical constant cost,
+and cost-weighted routing is simply switched off while the config looks correct.
+
+**This repo would have hit it.** All five arms declare their costs under `model_info` and none
+under `litellm_params`:
+
+```yaml
+  model_info:
+    id: claude-sonnet
+    input_cost_per_token: 3.0e-06      # <- adaptive_router does not read this
+    output_cost_per_token: 1.5e-05
+```
+
+The workaround is to duplicate the values into each `litellm_params` block. For a talk whose whole
+argument is that these systems fail silently rather than loudly, this is the cleanest possible
+example, and it is in the built-in product rather than in the speaker's own code.
 
 ---
 
@@ -206,10 +266,16 @@ qualifier earns its space.
 
 **Slide 16 second half, the 30 second beat, in delivery order:**
 
-1. LiteLLM ships an adaptive router. It is a bandit, it is Thompson sampling, it is configured
-   from the same proxy YAML as everything else, and it is cost-aware. *(switch it on live)*
-2. It learns from user satisfaction signals inferred from the conversation.
-3. My traffic has no user in it. Back-office batch work has no "thanks!" turn, and neither does the
+Revised 15 September 2026. Beat 1 used to say *"switch it on live"*. It cannot be switched on, and
+the reason replaced it - which is a better beat than the toggle was.
+
+1. LiteLLM ships an adaptive router. It is a bandit, it is Thompson sampling, it is configured from
+   the same proxy YAML as everything else, and it is cost-aware. I did not write it off.
+2. **It is not in the version I am running - and I did not choose that version.** It landed in
+   1.94. The AWS reference architecture pins 1.82. Deploy the guidance as published and the
+   built-in adaptive router is not there.
+3. Even where it is there, it learns from user-satisfaction signals inferred from the conversation.
+   My traffic has no user in it. Back-office batch work has no "thanks!" turn, and neither does the
    load generator that has been running since minute 2.
 4. So the one thing I built is the reward channel: a judge scores a sample of answers, and that
    score is what moves the posteriors.
@@ -217,6 +283,14 @@ qualifier earns its space.
    failure mode on the production slide coming up.
 
 Beat 5 is the one to protect if the segment runs long. It is the credibility, not the caveat.
+Beat 2 is the one to cut second - it is the newest and the most checkable, so only say it if you
+are willing to be asked which version they are on.
+
+**If there is time, or if someone asks how mature it is:** the adaptive router reads per-model cost
+from `litellm_params`, not from `model_info` where LiteLLM documents costs everywhere else. Declare
+them in the documented place and cost-weighted routing silently does nothing - empty `model_costs`,
+identical constant cost for every model, no error. This repo declares them exactly that way, so it
+would have shipped a cost dial that was not connected. Issue 31481.
 
 ---
 

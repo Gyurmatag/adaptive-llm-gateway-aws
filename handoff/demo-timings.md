@@ -3,10 +3,8 @@
 **For run-of-show validation.** Measured wall-clock seconds per demo beat, so
 the deck author can flag if Act 2 will not fit.
 
-Source: `handoff/e2e-test-report.md`. Measured against the **local stack**;
-the deployed stack adds ALB and cross-region latency per request but does not
-change the beat structure. Numbers marked `deployed: pending` need re-measuring
-once the AWS stack is up.
+Source: `handoff/e2e-test-report.md`. The table below is the **local stack**;
+the deployed numbers follow it and are now measured, not pending.
 
 ---
 
@@ -36,8 +34,8 @@ All from `handoff/e2e-test-report.md`, local stack, mock provider.
 | Demo 4, kill switch | **0.09s** to fire | - | - |
 | Demo 4, killed arm to 0% of traffic | **8s** | - | Visible almost immediately |
 | Demo 4, full re-sort to 85% | **32s** | 90s | Fits, and wants silence not filler |
-| Demo 5, budget 429 | **NOT MEASURED** | 10s | Needs AWS |
-| Fallback switch | **NOT MEASURED** | - | Needs a deployed stack |
+| Demo 5, budget block | **4-5s**, blocks after 3-5 requests | 10s | Fits. **Not a 429** - see below |
+| Fallback switch | **614ms / 622ms** (runs 5, 6) | - | Effectively instant |
 
 **The important number is Demo 2's 385ms -> 40ms.** That ratio is the beat. It
 is visible without explanation and it costs five seconds of stage time.
@@ -55,18 +53,33 @@ reason for starting it during slide 3.
   conversational and expands.
 - **Demo 4 needs silence, not time.** The brief says say nothing for a few
   seconds and let them watch. Budget the seconds; do not fill them.
-- **The 429 in Demo 5 is instant** once the budget key is near its ceiling.
-  Drive it close during the soak so it tips on stage rather than after 200
-  requests of waiting.
+- **Demo 5 is instant** once the budget key is near its ceiling. Drive it close
+  during the soak so it tips on stage rather than after 200 requests of waiting.
+  **Do not call it a 429.** On the deployed stack the block comes back as
+  **HTTP 200** with `budget_exceeded` in the body, because the guidance's
+  middleware passes the error through; locally it is a 400. Point at the JSON,
+  never at the status code.
 
 ---
 
-## Not yet measured
+## Measured against the DEPLOYED stack
 
-Everything above is the local stack. Against the deployed stack, re-measure:
+Amplify -> CloudFront -> ALB -> ECS -> Bedrock, runs 5 and 6.
 
-- Demo 1 per-request latency through the ALB (adds a hop plus TLS)
-- Demo 2 first-ask latency (real Bedrock inference, not a mock's 300ms sleep)
-- Demo 4 time from `kill_primary.sh` to visible re-sort on the Amplify dashboard
-  (adds SSE propagation through the ALB)
-- The `GATEWAY_BASE_URL` fallback switch, deployed -> localhost
+| Beat | Deployed | Note |
+|---|---|---|
+| Per-request latency, by arm | nova-lite **862ms**, gpt-on-bedrock **893ms**, ipr-nova **1090ms**, claude-haiku **1214ms**, claude-sonnet **2418ms** | Real Bedrock inference, through ALB and TLS |
+| `ipr-nova` under sustained load | 60/60 HTTP 200, **p95 1891ms** | Driven at the demo's own 3 req/s |
+| Demo 4, kill switch fires | **0-1s** | `POST /dash/admin/disable` - the file-based breaker cannot reach ECS |
+| Demo 4, errors across the failover | **0**, both runs | 3241 client requests in run 5 |
+| Demo 5, budget block | **4-5s**, after 3-5 requests | HTTP 200 + `budget_exceeded` body |
+| Fallback switch to standby | **614ms / 622ms** | Local gateway as standby, `STANDBY_KEY` required |
+| SSE first byte through CloudFront | **0.06-0.07s** | Not buffered; update frames continuous |
+| Full rehearsal wall clock | **1084-1091s** | Against the 17-minute Act 2 budget |
+
+**Savings shown on the dashboard at the end of a run: $3.5625, 72.6%**, across
+327,082 tokens and zero errors.
+
+The one number that got worse on the deployed stack is `claude-sonnet` at
+2418ms. It is the slowest arm by a factor of nearly three, which is worth
+knowing before Demo 1 addresses it directly on stage.
