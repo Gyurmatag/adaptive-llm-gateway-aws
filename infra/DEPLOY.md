@@ -278,7 +278,39 @@ The stack already provisions Secrets Manager for the database URL, so the
 mechanism is there and simply is not used for this one. On a real deployment,
 move it. **Do not screenshot the task definition for the deck.**
 
-### 11. Streaming and the ALB idle timeout
+### 11. The learning router cannot be horizontally scaled, and that is the point
+
+The service came up with **two** ECS tasks (autoscaling min 1, max 2). The
+dashboard then alternated between two completely independent belief states:
+
+```
+reqs=0  uptime=393.2  arms=0
+reqs=0  uptime=223.2  arms=0     <- a different task, 170s younger
+reqs=0  uptime=393.4  arms=0
+```
+
+The posteriors are **in-process state**. Two tasks means two routers, each
+learning from roughly half the traffic, each with its own view - and the
+dashboard shows whichever one the load balancer happened to pick for that
+poll. On stage the curves would visibly jump every second.
+
+For the demo, pin it:
+
+```bash
+aws application-autoscaling register-scalable-target --service-namespace ecs \
+  --resource-id service/<cluster>/<service> \
+  --scalable-dimension ecs:service:DesiredCount --min-capacity 1 --max-capacity 1
+aws ecs update-service --cluster <cluster> --service <service> --desired-count 1
+```
+
+**This is slide 19's argument arriving as an operational fact rather than a
+principle.** Learn mode cannot scale horizontally, because the thing being
+learned lives in one process's memory. Snapshot mode can: the policy is a
+shared, versioned artifact, every task serves the same frozen weights, and
+adding tasks changes throughput rather than behaviour. The demo runs the mode
+that does not scale, and says so.
+
+### 12. Streaming and the ALB idle timeout
 
 LiteLLM warns to keep `KEEPALIVE_TIMEOUT` **above** the load balancer idle
 timeout or streams get cut mid-flight. These are a matched pair:
