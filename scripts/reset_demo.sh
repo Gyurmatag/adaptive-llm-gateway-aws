@@ -42,8 +42,31 @@ if [ "$REMOTE" = "1" ]; then
        --force-new-deployment >/dev/null 2>&1; then
     echo "    waiting for the service to stabilise (~2-4 min)"
     aws ecs wait services-stable --cluster "$CLUSTER" --services "$SERVICE" 2>/dev/null \
-      && echo "    service stable, posteriors at priors" \
-      || echo "    !! service did not stabilise in time - check before running" >&2
+      || echo "    !! services-stable timed out" >&2
+
+    # services-stable is NOT enough on its own. It returns while the previous
+    # task is still draining, so traffic sent immediately afterwards lands on a
+    # task that is about to die - and its posteriors die with it. Observed: a
+    # soak whose first three minutes were silently discarded, with the
+    # dashboard showing 27 requests at t+179s.
+    #
+    # Wait for exactly one deployment AND a dashboard that answers with a clean
+    # slate before declaring the reset done.
+    DASH_URL="${DASHBOARD_BASE_URL:-$BASE/dash}"
+    DEADLINE=$(( $(date +%s) + 240 ))
+    while [ "$(date +%s)" -lt "$DEADLINE" ]; do
+      NDEP=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
+              --query 'length(services[0].deployments)' --output text 2>/dev/null)
+      NREQ=$(curl -sS -m 8 "$DASH_URL/state" 2>/dev/null \
+              | python3 -c "import json,sys;print(json.load(sys.stdin).get('total_requests','?'))" 2>/dev/null)
+      if [ "$NDEP" = "1" ] && [ "$NREQ" = "0" ]; then
+        echo "    service stable and serving a clean slate"
+        break
+      fi
+      sleep 10
+    done
+    [ "${NDEP:-}" = "1" ] && [ "${NREQ:-}" = "0" ] \
+      || echo "    !! reset may be incomplete (deployments=${NDEP:-?} requests=${NREQ:-?})" >&2
   else
     echo "    !! could not force a new deployment; is AWS_PROFILE set?" >&2
   fi
