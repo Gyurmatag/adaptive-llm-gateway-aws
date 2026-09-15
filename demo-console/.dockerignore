@@ -1,0 +1,9 @@
+node_modules
+.next
+out
+.git
+# The key lives here. It must never enter the image - the container receives it
+# from Secrets Manager at runtime instead.
+.env.local
+.env
+README.md

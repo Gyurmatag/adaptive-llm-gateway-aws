@@ -4,6 +4,7 @@ import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import { useState } from "react";
 import { Panel, Button, Label } from "./ui";
+import { api } from "@/lib/base";
 
 const MODELS = [
   { id: "demo-router", label: "Adaptive router", note: "picks per request" },
@@ -18,7 +19,7 @@ export function Chat() {
   const [model, setModel] = useState("demo-router");
   const [input, setInput] = useState("");
   const { messages, sendMessage, status, error } = useChat({
-    transport: new DefaultChatTransport({ api: "/api/chat" }),
+    transport: new DefaultChatTransport({ api: api("/api/chat") }),
   });
   const busy = status === "submitted" || status === "streaming";
 

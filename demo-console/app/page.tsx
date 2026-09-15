@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Chat } from "@/components/Chat";
 import { DemoFanout, DemoCache, DemoKill, DemoBudget } from "@/components/Demos";
 import { Stat } from "@/components/ui";
+import { api } from "@/lib/base";
 
 const TABS = [
   { id: "chat", label: "Chat" },
@@ -18,7 +19,7 @@ export default function Page() {
   const [live, setLive] = useState<{ state: any; spend: any } | null>(null);
 
   const refresh = useCallback(async () => {
-    const r = await fetch("/api/state", { cache: "no-store" }).then((x) => x.json()).catch(() => null);
+    const r = await fetch(api("/api/state"), { cache: "no-store" }).then((x) => x.json()).catch(() => null);
     if (r) setLive(r);
   }, []);
 

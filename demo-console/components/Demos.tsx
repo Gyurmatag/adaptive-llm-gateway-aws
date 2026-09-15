@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Panel, Button, Label, Stat } from "./ui";
+import { api } from "@/lib/base";
 
 type Fan = { model: string; ok: boolean; ms: number; text: string; servedBy: string | null };
 
@@ -12,7 +13,7 @@ export function DemoFanout() {
 
   async function run() {
     setBusy(true); setRows(null);
-    const r = await fetch("/api/fanout", {
+    const r = await fetch(api("/api/fanout"), {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ prompt }),
     }).then((x) => x.json()).catch(() => ({ results: [] }));
@@ -49,7 +50,7 @@ export function DemoCache() {
 
   async function run() {
     setBusy(true); setRes(null);
-    const r = await fetch("/api/cache", {
+    const r = await fetch(api("/api/cache"), {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         cold: `What is the capital of ${country}?`,
@@ -102,7 +103,7 @@ export function DemoKill({ onChange }: { onChange: () => void }) {
 
   async function act(action: "disable" | "enable", arm?: string) {
     setBusy(true);
-    const r = await fetch("/api/arm", {
+    const r = await fetch(api("/api/arm"), {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action, arm }),
     }).then((x) => x.json()).catch(() => null);
@@ -135,7 +136,7 @@ export function DemoBudget() {
 
   async function run() {
     setBusy(true); setRes(null);
-    const r = await fetch("/api/budget", {
+    const r = await fetch(api("/api/budget"), {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ maxBudget: 0.0002 }),
     }).then((x) => x.json()).catch(() => null);

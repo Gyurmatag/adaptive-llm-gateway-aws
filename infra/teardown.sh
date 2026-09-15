@@ -66,6 +66,52 @@ fi
 echo "==> prompt routers: none created by this stack, nothing to delete"
 echo "    (the demo uses the account's AWS-managed default prompt routers)"
 
+# --- the demo console -------------------------------------------------------
+#
+# Added by hand for the talk, so nothing in the guidance's stack knows about it
+# and nothing else will clean it up. Order matters: the service has to be gone
+# before the target group can be deleted, and the listener rules before that.
+echo "==> removing the demo console"
+CONSOLE_TG="$($AWS elbv2 describe-target-groups --names demo-console-3100 \
+  --query 'TargetGroups[0].TargetGroupArn' --output text 2>/dev/null)"
+
+if $AWS ecs describe-services --cluster litellm-stack-cluster --services DemoConsoleService \
+     --query 'services[0].status' --output text 2>/dev/null | grep -q ACTIVE; then
+  $AWS ecs update-service --cluster litellm-stack-cluster --service DemoConsoleService \
+    --desired-count 0 >/dev/null 2>&1
+  $AWS ecs delete-service --cluster litellm-stack-cluster --service DemoConsoleService --force \
+    >/dev/null 2>&1 && echo "  deleted DemoConsoleService" || echo "  could not delete DemoConsoleService"
+fi
+
+ALB_ARN="$($AWS elbv2 describe-load-balancers --query 'LoadBalancers[0].LoadBalancerArn' --output text 2>/dev/null)"
+for L in $($AWS elbv2 describe-listeners --load-balancer-arn "$ALB_ARN" \
+           --query 'Listeners[].ListenerArn' --output text 2>/dev/null); do
+  R="$($AWS elbv2 describe-rules --listener-arn "$L" \
+       --query "Rules[?Priority=='50'].RuleArn" --output text 2>/dev/null)"
+  [ -n "$R" ] && $AWS elbv2 delete-rule --rule-arn "$R" >/dev/null 2>&1 \
+    && echo "  deleted a /console listener rule"
+done
+
+if [ -n "$CONSOLE_TG" ] && [ "$CONSOLE_TG" != "None" ]; then
+  # The service has to finish draining first.
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    $AWS elbv2 delete-target-group --target-group-arn "$CONSOLE_TG" >/dev/null 2>&1 \
+      && { echo "  deleted target group demo-console-3100"; break; }
+    sleep 10
+  done
+fi
+
+$AWS ec2 revoke-security-group-ingress --group-id sg-03cbea62b9a6e0ab3 \
+  --protocol tcp --port 3100 --source-group sg-020c3ff99aaec5a80 >/dev/null 2>&1 \
+  && echo "  closed port 3100 on the task security group"
+
+$AWS ecr delete-repository --repository-name demo-console --force >/dev/null 2>&1 \
+  && echo "  deleted the demo-console ECR repository"
+$AWS ecr delete-repository --repository-name redis-stack --force >/dev/null 2>&1 \
+  && echo "  deleted the redis-stack ECR repository"
+$AWS logs delete-log-group --log-group-name /ecs/demo-console >/dev/null 2>&1 \
+  && echo "  deleted the demo-console log group"
+
 echo "==> deleting the Amplify app"
 APP_ID="$($AWS amplify list-apps --query "apps[?name=='${PROJECT}-dashboard'].appId" --output text 2>/dev/null)"
 if [ -n "$APP_ID" ] && [ "$APP_ID" != "None" ]; then
