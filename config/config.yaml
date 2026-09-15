@@ -14,181 +14,176 @@
 
 model_list:
 
+  # NOTE: `os.environ/VAR` is only expanded when it is the WHOLE value. Writing
+  # `bedrock/converse/os.environ/MODEL_X` does not interpolate - LiteLLM sends
+  # that literal string to Bedrock and you get "The provided model identifier
+  # is invalid", which looks like a wrong model id and is actually a config
+  # syntax problem. Model ids are not secrets, so they are inlined here; only
+  # the prompt router ARN (which carries the account id) stays an env var, and
+  # that var holds the full `bedrock/converse/arn:...` string.
+
+  # NOTE: `tier` is a RESERVED model_info field and only accepts 'free' or
+  # 'paid'. Using it for anything else fails pydantic validation and LiteLLM
+  # DROPS that deployment with "ignoring and continuing with other
+  # deployments" - the gateway still starts, just with a smaller fleet than
+  # the config describes. Custom metadata needs a non-reserved key.
+
   # ---------------------------------------------------------------- bandit arms
-  # These six deployments are the candidate pool the router samples over.
-  # `model_info.arm` marks a deployment as a bandit arm; the judge is excluded.
+  # Verified by INVOCATION against eu-central-1 on 15 September 2026, not by
+  # catalog lookup. A model can list as ACTIVE and refuse every call.
+  #
+  # NOTE: bare model ids do NOT work. `anthropic.claude-sonnet-4-5-...` returns
+  # "Invocation of model ID X with on-demand throughput isn't supported", which
+  # reads like a quota problem and is not one. Everything Anthropic or Nova must
+  # be addressed through an `eu.` inference profile.
 
-  # Bedrock Intelligent Prompt Routing - Claude pair (Haiku / Sonnet).
-  # The ARN comes from `aws bedrock create-prompt-router`, run by bootstrap.sh,
-  # and is injected as an env var rather than committed. Motif marker: buy.
-  - model_name: ipr-claude
-    litellm_params:
-      model: bedrock/converse/os.environ/IPR_CLAUDE_ARN
-      aws_region_name: os.environ/AWS_REGION
-    model_info:
-      arm: true
-      family: anthropic
-      tier: managed-router
-      input_cost_per_token: 0.000001
-      output_cost_per_token: 0.000005
-      adaptive_router_preferences:
-        quality_tier: 3
-        strengths: ["analytical_reasoning", "summarization"]
-
-  # Bedrock Intelligent Prompt Routing - Nova pair (Lite / Pro).
-  - model_name: ipr-nova
-    litellm_params:
-      model: bedrock/converse/os.environ/IPR_NOVA_ARN
-      aws_region_name: os.environ/AWS_REGION
-    model_info:
-      arm: true
-      family: nova
-      tier: managed-router
-      input_cost_per_token: 0.00000035
-      output_cost_per_token: 0.0000014
-      adaptive_router_preferences:
-        quality_tier: 2
-        strengths: ["factual_lookup", "summarization"]
-
-  # Direct Claude Sonnet - the quality anchor and the demo's primary.
-  # kill_primary.sh zeroes this deployment's rpm for Demo 4.
   - model_name: claude-sonnet
     litellm_params:
-      model: bedrock/converse/os.environ/MODEL_CLAUDE_SONNET
+      model: bedrock/converse/eu.anthropic.claude-sonnet-4-5-20250929-v1:0
       aws_region_name: os.environ/AWS_REGION
     model_info:
+      id: direct-claude-sonnet
       arm: true
       family: anthropic
-      tier: premium
+      sf_tier: premium
       input_cost_per_token: 0.000003
       output_cost_per_token: 0.000015
-      adaptive_router_preferences:
-        quality_tier: 4
-        strengths: ["code_generation", "analytical_reasoning"]
 
-  # A GPT model served by Bedrock. This is the slide 9 proof point: OpenAI
-  # models run inside your own AWS account, no third party in the request path.
+  - model_name: claude-haiku
+    litellm_params:
+      model: bedrock/converse/eu.anthropic.claude-haiku-4-5-20251001-v1:0
+      aws_region_name: os.environ/AWS_REGION
+    model_info:
+      id: direct-claude-haiku
+      arm: true
+      family: anthropic
+      sf_tier: mid
+      input_cost_per_token: 0.000001
+      output_cost_per_token: 0.000005
+
+  # An OpenAI model served by Bedrock. ON_DEMAND and region-local in
+  # eu-central-1, so it stays EU-resident - which the gpt-5.6 family does NOT:
+  # those exist only as `global.` inference profiles in this region.
+  #
+  # It emits a reasoningContent block before its text block, so max_tokens has
+  # to be generous or the text comes back empty.
   - model_name: gpt-on-bedrock
     litellm_params:
-      model: bedrock/converse/os.environ/MODEL_GPT
+      model: bedrock/converse/openai.gpt-oss-120b-1:0
       aws_region_name: os.environ/AWS_REGION
     model_info:
+      id: direct-gpt-on-bedrock
       arm: true
       family: openai
-      tier: premium
-      input_cost_per_token: 0.00000125
-      output_cost_per_token: 0.00001
-      adaptive_router_preferences:
-        quality_tier: 4
-        strengths: ["code_generation", "creative_writing"]
+      sf_tier: premium
+      input_cost_per_token: 0.00000015
+      output_cost_per_token: 0.0000006
 
-  # The cheap arm. The bandit should discover on its own that this is good
-  # enough for most of the mixed prompt pool, which is the whole demo.
   - model_name: nova-lite
     litellm_params:
-      model: bedrock/converse/os.environ/MODEL_NOVA_LITE
+      model: bedrock/converse/eu.amazon.nova-lite-v1:0
       aws_region_name: os.environ/AWS_REGION
     model_info:
+      id: direct-nova-lite
       arm: true
       family: nova
-      tier: cheap
+      sf_tier: cheap
       input_cost_per_token: 0.00000006
       output_cost_per_token: 0.00000024
-      adaptive_router_preferences:
-        quality_tier: 1
-        strengths: ["factual_lookup"]
+
+  # Bedrock Intelligent Prompt Routing, Nova pair. An AWS DEFAULT prompt router
+  # - no create-prompt-router needed. Motif marker: buy.
+  #
+  # The default ANTHROPIC router is deliberately absent: it pairs Claude 3.5
+  # Haiku with Sonnet 3.5 v2, both retired in this region, and invoking it
+  # returns "This model version has reached the end of its life." That is
+  # slide 11's argument as a live failure rather than an assertion.
+  - model_name: ipr-nova
+    litellm_params:
+      model: os.environ/IPR_NOVA_MODEL
+      aws_region_name: os.environ/AWS_REGION
+    model_info:
+      id: direct-ipr-nova
+      arm: true
+      family: nova
+      sf_tier: managed-router
+      input_cost_per_token: 0.00000035
+      output_cost_per_token: 0.0000014
 
   # ------------------------------------------------------- semantic cache embed
-  # Backs the semantic cache only. Not a bandit arm, not a chat model.
+  # An EMBEDDING model, not a chat model, and provider-qualified because the
+  # cache calls litellm.embedding() directly rather than through the Router.
   - model_name: embed
     litellm_params:
-      model: bedrock/os.environ/MODEL_EMBED
+      model: bedrock/amazon.titan-embed-text-v2:0
       aws_region_name: os.environ/AWS_REGION
     model_info:
       arm: false
 
   # ----------------------------------------------------------------- the judge
-  # Excluded from routing (`arm: false`). Scores a sampled fraction of answers
-  # asynchronously and that score is the reward that moves the posteriors.
-  # This is the component branch B exists for - see handoff/branch-decision.md.
+  # Excluded from routing. Scores a sampled fraction of answers, and that score
+  # is the reward that moves the posteriors - the component branch B exists for.
   - model_name: judge
     litellm_params:
-      model: bedrock/converse/os.environ/MODEL_JUDGE
+      model: bedrock/converse/eu.amazon.nova-micro-v1:0
       aws_region_name: os.environ/AWS_REGION
     model_info:
       arm: false
       family: nova
-      tier: judge
+      sf_tier: judge
       input_cost_per_token: 0.000000035
       output_cost_per_token: 0.00000014
 
-  # -------------------------------------------------- built-in adaptive router
-  # Shipped so slide 16's "show it being switched on" is a live switch rather
-  # than a screenshot. Configured from proxy YAML - see branch-decision.md Q1,
-  # which corrects the stale "SDK-only" claim in the brief.
-  #
-  # Do NOT enable routing plugins alongside this: `adaptive: true` with plugins
-  # raises at config validation.
-  - model_name: builtin-adaptive
-    litellm_params:
-      model: auto_router/adaptive_router
-    adaptive_router_config:
-      available_models: ["claude-sonnet", "gpt-on-bedrock", "nova-lite", "ipr-nova"]
-      weights:
-        quality: 0.7
-        cost: 0.3
-      session_affinity: true
-      session_affinity_ttl_seconds: 3600
-
   # ------------------------------------------------------- the bandit's group
-  # LiteLLM's router chooses among deployments that SHARE a model_name. The
-  # entries above have unique names so Demo 1 can address them individually
-  # ("same curl, three model strings"); these duplicates put the same
-  # deployments into one group called `demo-router`, which is the candidate set
-  # the Thompson strategy actually samples over.
-  #
-  # model_info.id is set explicitly so the arm keeps a stable, readable name in
-  # the posteriors, the audit log and the dashboard. Without it LiteLLM
-  # generates a uuid and every curve is labelled with a hash.
+  # LiteLLM routes among deployments that SHARE a model_name. The entries above
+  # have unique names so Demo 1 can address them individually; these duplicates
+  # put the same deployments into one group the Thompson strategy samples over.
+  # model_info.id is explicit so arms keep readable names in the posteriors,
+  # the audit log and the dashboard.
+
   - model_name: demo-router
     litellm_params:
-      model: bedrock/converse/os.environ/MODEL_CLAUDE_SONNET
+      model: bedrock/converse/eu.anthropic.claude-sonnet-4-5-20250929-v1:0
       aws_region_name: os.environ/AWS_REGION
     model_info:
       id: claude-sonnet
       arm: true
       input_cost_per_token: 0.000003
       output_cost_per_token: 0.000015
+
   - model_name: demo-router
     litellm_params:
-      model: bedrock/converse/os.environ/MODEL_GPT
+      model: bedrock/converse/eu.anthropic.claude-haiku-4-5-20251001-v1:0
+      aws_region_name: os.environ/AWS_REGION
+    model_info:
+      id: claude-haiku
+      arm: true
+      input_cost_per_token: 0.000001
+      output_cost_per_token: 0.000005
+
+  - model_name: demo-router
+    litellm_params:
+      model: bedrock/converse/openai.gpt-oss-120b-1:0
       aws_region_name: os.environ/AWS_REGION
     model_info:
       id: gpt-on-bedrock
       arm: true
-      input_cost_per_token: 0.00000125
-      output_cost_per_token: 0.00001
+      input_cost_per_token: 0.00000015
+      output_cost_per_token: 0.0000006
+
   - model_name: demo-router
     litellm_params:
-      model: bedrock/converse/os.environ/MODEL_NOVA_LITE
+      model: bedrock/converse/eu.amazon.nova-lite-v1:0
       aws_region_name: os.environ/AWS_REGION
     model_info:
       id: nova-lite
       arm: true
       input_cost_per_token: 0.00000006
       output_cost_per_token: 0.00000024
+
   - model_name: demo-router
     litellm_params:
-      model: bedrock/converse/os.environ/IPR_CLAUDE_ARN
-      aws_region_name: os.environ/AWS_REGION
-    model_info:
-      id: ipr-claude
-      arm: true
-      input_cost_per_token: 0.000001
-      output_cost_per_token: 0.000005
-  - model_name: demo-router
-    litellm_params:
-      model: bedrock/converse/os.environ/IPR_NOVA_ARN
+      model: os.environ/IPR_NOVA_MODEL
       aws_region_name: os.environ/AWS_REGION
     model_info:
       id: ipr-nova
@@ -208,12 +203,14 @@ router_settings:
   # Every primary has a cross-family successor. Demo 4 exercises this: when
   # claude-sonnet is killed, traffic must land on a different family and the
   # error counter must stay at zero.
+  # Every primary has a cross-family successor. Demo 4 exercises this.
   fallbacks:
-    - claude-sonnet:   ["gpt-on-bedrock", "ipr-nova", "nova-lite"]
-    - gpt-on-bedrock:  ["claude-sonnet", "ipr-claude", "nova-lite"]
-    - ipr-claude:      ["ipr-nova", "claude-sonnet", "nova-lite"]
-    - ipr-nova:        ["nova-lite", "ipr-claude", "claude-sonnet"]
-    - nova-lite:       ["ipr-nova", "gpt-on-bedrock", "claude-sonnet"]
+    - claude-sonnet:  ["claude-haiku", "gpt-on-bedrock", "nova-lite"]
+    - claude-haiku:   ["nova-lite", "gpt-on-bedrock", "claude-sonnet"]
+    - gpt-on-bedrock: ["claude-haiku", "ipr-nova", "nova-lite"]
+    - ipr-nova:       ["nova-lite", "gpt-on-bedrock", "claude-haiku"]
+    - nova-lite:      ["ipr-nova", "claude-haiku", "gpt-on-bedrock"]
+    - demo-router:    ["claude-haiku", "nova-lite"]
 
   num_retries: 3
   retry_after: 2
@@ -250,6 +247,7 @@ litellm_settings:
     # Router, so a group name fails with "LLM Provider NOT provided" and the
     # gateway does not start. Must also be an EMBEDDING model, not a chat one.
     redis_semantic_cache_embedding_model: bedrock/amazon.titan-embed-text-v2:0
+    # Titan embed v2 returns 1024 dimensions - verified by invocation.
     # Isolate cache buckets per end user so one attendee's question cannot
     # serve another's. Also stops a demo reset from being polluted.
     semantic_cache_scope: end_user

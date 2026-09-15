@@ -52,15 +52,21 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-mock}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-http://host.docker.internal:9100/v1}
       AWS_REGION: ${AWS_REGION:-eu-central-1}
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
-      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+      # Mount the profile rather than copying key material into the compose
+      # environment, where it would end up in `docker inspect` and in shell
+      # history. On ECS none of this exists - the task role supplies creds.
+      AWS_PROFILE: ${AWS_PROFILE:-awsday}
+      AWS_CONFIG_FILE: /aws/config
+      AWS_SHARED_CREDENTIALS_FILE: /aws/credentials
       IPR_CLAUDE_ARN: ${IPR_CLAUDE_ARN:-}
       IPR_NOVA_ARN: ${IPR_NOVA_ARN:-}
-      MODEL_CLAUDE_SONNET: ${MODEL_CLAUDE_SONNET:-anthropic.claude-sonnet-4-5-20250929-v1:0}
-      MODEL_GPT: ${MODEL_GPT:-openai.gpt-5-6-20260817-v1:0}
-      MODEL_NOVA_LITE: ${MODEL_NOVA_LITE:-amazon.nova-lite-v1:0}
-      MODEL_JUDGE: ${MODEL_JUDGE:-amazon.nova-micro-v1:0}
+      IPR_NOVA_MODEL: ${IPR_NOVA_MODEL:-}
+      MODEL_CLAUDE_SONNET: ${MODEL_CLAUDE_SONNET:-eu.anthropic.claude-sonnet-4-5-20250929-v1:0}
+      MODEL_CLAUDE_HAIKU: ${MODEL_CLAUDE_HAIKU:-eu.anthropic.claude-haiku-4-5-20251001-v1:0}
+      MODEL_GPT: ${MODEL_GPT:-openai.gpt-oss-120b-1:0}
+      MODEL_NOVA_LITE: ${MODEL_NOVA_LITE:-eu.amazon.nova-lite-v1:0}
+      MODEL_JUDGE: ${MODEL_JUDGE:-eu.amazon.nova-micro-v1:0}
+      MODEL_EMBED: ${MODEL_EMBED:-amazon.titan-embed-text-v2:0}
       ROUTER_GAMMA: ${ROUTER_GAMMA:-0.10}
       ROUTER_MIN_OBS: ${ROUTER_MIN_OBS:-120}
       ROUTER_EXPLORE_P: ${ROUTER_EXPLORE_P:-0.40}
@@ -80,6 +86,7 @@ services:
       - ${CONFIG_FILE:-./config/config.yaml}:/app/config.yaml:ro
       - ./router:/app/router:ro
       - ./router/state:/app/router_state
+      - ${HOME}/.aws:/aws:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     command: ["--config", "/app/config.yaml", "--port", "4000", "--num_workers", "1"]

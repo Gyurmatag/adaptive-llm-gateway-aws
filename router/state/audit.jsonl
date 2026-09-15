@@ -155,3 +155,7 @@
 {"ts": 1789402899.5449598, "event": "route", "arm": "nova-lite", "reason": "thompson", "task_class": "_all", "gamma": 0.1, "theta": {"claude-sonnet": 0.8934, "gpt-on-bedrock": 0.8045, "ipr-nova": 0.927, "nova-lite": 0.9323}, "score": {"claude-sonnet": 2.9733, "gpt-on-bedrock": 2.8308, "ipr-nova": 3.8757, "nova-lite": 4.6497}}
 {"ts": 1789402899.8544176, "event": "reward", "arm": "nova-lite", "task_class": "_all", "judge_score": 0.42, "success": false, "latency_ms": 136.1, "cost_usd": 8.4e-07, "decay_applied": false}
 {"ts": 1789402899.8765624, "event": "route", "arm": "ipr-nova", "reason": "thompson", "task_class": "_all", "gamma": 0.1, "theta": {"claude-sonnet": 0.9943, "gpt-on-bedrock": 0.8684, "ipr-nova": 0.8352, "nova-lite": 0.6977}, "score": {"claude-sonnet": 3.3089, "gpt-on-bedrock": 3.0557, "ipr-nova": 3.4919, "nova-lite": 3.4797}}
+{"ts": 1789454920.0771205, "event": "failure", "arm": "claude-sonnet"}
+{"ts": 1789454922.8717823, "event": "failure", "arm": "gpt-on-bedrock"}
+{"ts": 1789454925.7830296, "event": "failure", "arm": "nova-lite"}
+{"ts": 1789454928.3342822, "event": "failure", "arm": "ipr-nova"}

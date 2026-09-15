@@ -9,6 +9,11 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
+# Read the model ids and ARNs the operator has already verified. Without this
+# the script checks its own placeholder defaults and reports failures for
+# models nobody is using.
+[ -f config/.env ] && set -a && . config/.env && set +a
+
 PROFILE="${AWS_PROFILE:-awsday}"
 REGION="${AWS_REGION:-eu-central-1}"
 PROJECT="${PROJECT:-awsday-gateway}"
@@ -90,18 +95,36 @@ fi
 # ------------------------------------------------------------ 2. model access
 say "2. Bedrock model access (fails in ways that look like config errors)"
 check_model() {
+  # INVOKE, do not just look up. A model can be ACTIVE in the catalog and still
+  # refuse every call - the gpt-5.6 family lists as ACTIVE and returns
+  # "not available for this account" until model access is granted, and bare
+  # ids list as ACTIVE but reject on-demand invocation. Listing lies; calling
+  # does not.
   local region="$1" id="$2"
   local out
-  out="$(aws --profile "$PROFILE" --region "$region" bedrock get-foundation-model \
-        --model-identifier "$id" --query 'modelDetails.modelLifecycle.status' \
-        --output text 2>&1)"
-  if [ "$out" = "ACTIVE" ]; then echo "ACTIVE"; else echo "MISSING"; fi
+  case "$id" in
+    *embed*|*titan-embed*)
+      out="$(aws --profile "$PROFILE" --region "$region" bedrock-runtime invoke-model \
+            --model-id "$id" --body '{"inputText":"ping"}' \
+            --cli-binary-format raw-in-base64-out --content-type application/json \
+            /dev/stdout 2>&1)"
+      echo "$out" | grep -qi embedding && echo "ACTIVE" || echo "MISSING"
+      return ;;
+  esac
+  out="$(aws --profile "$PROFILE" --region "$region" bedrock-runtime converse \
+        --model-id "$id" --messages '[{"role":"user","content":[{"text":"ping"}]}]' \
+        --inference-config '{"maxTokens":8}' 2>&1)"
+  echo "$out" | grep -q '"output"' && echo "ACTIVE" || echo "MISSING"
 }
 
-MODELS="${MODEL_CLAUDE_SONNET:-anthropic.claude-sonnet-4-5-20250929-v1:0}
-${MODEL_GPT:-openai.gpt-5-6-20260817-v1:0}
-${MODEL_NOVA_LITE:-amazon.nova-lite-v1:0}
-${MODEL_JUDGE:-amazon.nova-micro-v1:0}"
+# Defaults are inference-profile ids, not bare model ids. A bare id fails with
+# "Invocation of model ID X with on-demand throughput isn't supported", which
+# reads like a quota problem and is not one.
+MODELS="${MODEL_CLAUDE_SONNET:-eu.anthropic.claude-sonnet-4-5-20250929-v1:0}
+${MODEL_GPT:-openai.gpt-oss-120b-1:0}
+${MODEL_NOVA_LITE:-eu.amazon.nova-lite-v1:0}
+${MODEL_JUDGE:-eu.amazon.nova-micro-v1:0}
+${MODEL_EMBED:-amazon.titan-embed-text-v2:0}"
 
 echo "  checking in $REGION:"
 for M in $MODELS; do
@@ -130,48 +153,65 @@ fi
 
 # ---------------------------------------------------------- 3. prompt routers
 say "3. Intelligent Prompt Router ARNs"
-create_router() {
-  local name="$1" fallback="$2" primary="$3"
-  local existing
-  existing="$($AWS bedrock list-prompt-routers \
-    --query "promptRouterSummaries[?promptRouterName=='$name'].promptRouterArn" \
-    --output text 2>/dev/null)"
-  if [ -n "$existing" ] && [ "$existing" != "None" ]; then
-    echo "$existing"; return 0
+
+# AWS ships DEFAULT prompt routers per family. Prefer them over creating custom
+# ones: they already exist, they need no permissions to create, and
+# create-prompt-router fails on accounts without the older family models.
+#
+# Each default router is checked by actually INVOKING it, because a router can
+# exist and still be dead: the default Anthropic router pairs Claude 3.5 Haiku
+# with Sonnet 3.5 v2, and in regions where those have been retired it returns
+#   ResourceNotFoundException: This model version has reached the end of its life.
+# Listing it would report a healthy router. Only invoking it tells the truth.
+probe_router() {
+  local arn="$1"
+  local out
+  out="$($AWS bedrock-runtime converse --model-id "$arn" \
+      --messages '[{"role":"user","content":[{"text":"ping"}]}]' \
+      --inference-config '{"maxTokens":8}' 2>&1)"
+  if echo "$out" | grep -q '"output"'; then
+    echo "ALIVE"
+  elif echo "$out" | grep -qi "end of its life"; then
+    echo "EOL"
+  else
+    echo "DEAD"
   fi
-  $AWS bedrock create-prompt-router \
-    --prompt-router-name "$name" \
-    --models "[{\"modelArn\":\"$primary\"},{\"modelArn\":\"$fallback\"}]" \
-    --fallback-model "{\"modelArn\":\"$fallback\"}" \
-    --routing-criteria '{"responseQualityDifference":0.10}' \
-    --query promptRouterArn --output text 2>/dev/null
 }
 
-ARN_PREFIX="arn:aws:bedrock:${REGION}::foundation-model"
-IPR_CLAUDE="$(create_router "${PROJECT}-claude" \
-  "${ARN_PREFIX}/${IPR_CLAUDE_CHEAP:-anthropic.claude-3-5-haiku-20241022-v1:0}" \
-  "${ARN_PREFIX}/${IPR_CLAUDE_STRONG:-anthropic.claude-3-5-sonnet-20241022-v2:0}")"
-IPR_NOVA="$(create_router "${PROJECT}-nova" \
-  "${ARN_PREFIX}/${IPR_NOVA_CHEAP:-amazon.nova-lite-v1:0}" \
-  "${ARN_PREFIX}/${IPR_NOVA_STRONG:-amazon.nova-pro-v1:0}")"
+IPR_NOVA=""
+IPR_CLAUDE=""
+while IFS=$'\t' read -r NAME ARN; do
+  [ -z "${ARN:-}" ] && continue
+  STATUS="$(probe_router "$ARN")"
+  case "$STATUS" in
+    ALIVE) ok   "$NAME is alive" ;;
+    EOL)   warn "$NAME exists but its underlying models are END OF LIFE in $REGION" ;;
+    *)     warn "$NAME did not answer" ;;
+  esac
+  if [ "$STATUS" = "ALIVE" ]; then
+    case "$ARN" in
+      *amazon.nova*)     IPR_NOVA="$ARN" ;;
+      *anthropic.claude*) IPR_CLAUDE="$ARN" ;;
+    esac
+  fi
+done < <($AWS bedrock list-prompt-routers \
+          --query 'promptRouterSummaries[].[promptRouterName,promptRouterArn]' \
+          --output text 2>/dev/null)
 
-if [ -n "$IPR_CLAUDE" ] && [ "$IPR_CLAUDE" != "None" ]; then
-  ok "Claude prompt router ready"
-else
-  warn "Claude prompt router not created - the demo still works without IPR arms"
-fi
-if [ -n "$IPR_NOVA" ] && [ "$IPR_NOVA" != "None" ]; then
-  ok "Nova prompt router ready"
-else
-  warn "Nova prompt router not created"
-fi
+[ -z "$IPR_NOVA" ] && warn "no usable Nova prompt router - the demo runs without that arm"
+[ -z "$IPR_CLAUDE" ] && warn "no usable Anthropic prompt router - see handoff/branch-decision.md, this is slide 11 content"
 
-# Write ARNs to the local env file only. They contain the account id, so they
-# must never reach a commit - config/.env is gitignored, .env.example is not.
+# ARNs contain the account id, so they go to config/.env only, never a commit.
+# Only overwrite a value we actually resolved: clobbering a verified ARN with
+# an empty string is worse than leaving it alone.
 if [ -f config/.env ]; then
-  sed -i.bak '/^IPR_CLAUDE_ARN=/d;/^IPR_NOVA_ARN=/d' config/.env && rm -f config/.env.bak
-  { echo "IPR_CLAUDE_ARN=$IPR_CLAUDE"; echo "IPR_NOVA_ARN=$IPR_NOVA"; } >> config/.env
-  ok "ARNs written to config/.env (gitignored)"
+  for PAIR in "IPR_NOVA_ARN=$IPR_NOVA" "IPR_CLAUDE_ARN=$IPR_CLAUDE"; do
+    KEY="${PAIR%%=*}"; VAL="${PAIR#*=}"
+    [ -z "$VAL" ] && continue
+    sed -i.bak "/^${KEY}=/d" config/.env && rm -f config/.env.bak
+    echo "${KEY}=${VAL}" >> config/.env
+  done
+  ok "usable ARNs written to config/.env (gitignored)"
 else
   warn "config/.env missing - copy config/.env.example first"
 fi
