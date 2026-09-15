@@ -418,6 +418,90 @@ Once all arms clear the floor, exploration stops and pure Thompson takes over.
 the curves. At 0.3 the posteriors were still too wide at t+1020 for the
 separation to be visually convincing.
 
+**Why "separated" now measures discrimination, not the top two.** The gate
+used to ask whether the single best arm was distinguishable from the second
+best. On this fleet it never can be, and that is a property of the models
+rather than a failure of the router:
+
+```
+arm              mean      sd   obs   req   $/1k req
+claude-haiku     0.872  0.0294   131   529     0.6621
+claude-sonnet    0.869  0.0355    90   401     1.9133
+nova-lite        0.819  0.0380   103   411     0.1529
+ipr-nova         0.809  0.0481    66   308     0.2860
+gpt-on-bedrock   0.721  0.0452    98   436     0.1361
+```
+
+`claude-haiku` and `claude-sonnet` both clear the 0.85 judge threshold at about
+0.87. The true gap is **0.0027**. Separating a gap that small needs on the order
+of **1e5 observations per arm** - roughly thirty hours of soak at 3 req/s. The
+rehearsal was reporting `separated=False` for something no amount of soaking
+could fix, and two runs were spent tuning gamma and the exploration floor
+against it.
+
+What is measurable inside the window, and what the curves actually show from the
+back of a room, is **discrimination**: the leader against the worst arm.
+
+```
+discrimination=0.1507 vs 0.0746  separated=True
+top2=0.0027 vs 0.0648            TIED
+leader_cheaper_than_runnerup=True (0.6621 vs 1.9133 per 1k)
+minobs=66
+```
+
+**This is the better stage claim, not a weaker one.** Two arms being tied on
+quality is the *setup* for the whole talk: when quality is indistinguishable,
+the router takes the cheap one. `claude-haiku` leads on traffic at **2.9x less
+cost per request than `claude-sonnet`** at statistically identical quality. Say
+that, and point at the `gpt-on-bedrock` curve sitting clearly below the pack as
+the thing the router learned to avoid.
+
+---
+
+## The bug that cost two rehearsals: an arm that was switched off
+
+Run 4 reported `separated=False minobs=36` with `ipr-nova` frozen at 31
+observations while every other arm climbed past 120. It was not a bandit
+problem. `ipr-nova` was **in the circuit breaker's `DISABLED` file** and had
+been withheld from every routing decision.
+
+`kill_primary.sh` writes the killed arm into `DISABLED`. `reset_demo.sh` clears
+it - but only at the *start* of a run, and the kill drill is beat 6 of 8. So a
+finished run leaves the breaker dirty and the next one begins with an arm
+already off.
+
+Measured directly, before the fix:
+
+```
+150 requests driven at the demo-router group
+  nova-lite        41   0.414
+  claude-haiku     32   0.323
+  gpt-on-bedrock   26   0.263
+  claude-sonnet     0   0.000
+  ipr-nova          0   0.000     <- 0 of 99 selections
+```
+
+The exploration floor should have poured 40% of traffic into `ipr-nova`, since
+it was the least-observed arm by a wide margin. It got none, because the
+breaker removed it from `healthy` before the bandit ever saw it. The arm itself
+was fine: driven directly at soak rate it returned **60/60 HTTP 200, p95
+1891ms**.
+
+**Why it went unnoticed for two runs.** The dashboard kept drawing the arm with
+the posterior it had when it was killed. A switched-off arm and a merely
+under-observed arm rendered identically. Three fixes, because one was not
+enough:
+
+- the router prints a throttled warning and writes a `breaker_active` audit
+  event whenever it withholds an arm
+- `/state` carries `disabled_arms` and a per-arm `disabled` flag; the traffic
+  split strikes the arm through and badges it **off**
+- the rehearsal asserts a clean breaker after the reset and restores it after
+  the kill drill, so a run can no longer poison the next one
+
+Run 5, after the fix: every arm accumulating, `minobs=66`, 3241 requests, **0
+errors**.
+
 ---
 
 ## Error count across the failover
@@ -447,20 +531,28 @@ turns on and it held.
 
 ## What is blocked, and why
 
-No AWS credential exists on the machine: the account has zero IAM users and
-zero Identity Center users, so the CLI has nothing to authenticate with.
+Superseded. This section previously recorded that no AWS credential existed on
+the machine, so nothing could run against real infrastructure. That is no
+longer true and the items are kept here only so the history is legible:
 
-Not executed as a result:
-- Both runs against the **deployed** stack
-- The **hotspot** run
-- Demo 5 (budget key)
-- The fallback drill with a real second endpoint
-- `bedrock/converse/` ARN smoke test - **the highest-risk integration point in
-  the whole build, per section 6.6, and it remains untested**
+| Previously blocked | Status |
+|---|---|
+| Runs against the **deployed** stack | **Done** - runs 3, 4, 5 and 6 all ran against ECS behind CloudFront |
+| Demo 5 (budget key) | **Done** - blocks after 3 requests, 5s. HTTP **200** on the deployed stack with `budget_exceeded` in the body |
+| Fallback drill with a real second endpoint | **Done** - standby answered in **614ms**. It had been failing on a 401, not a dead standby: beat 8 authenticated to the local gateway with the *deployed* master key. `STANDBY_KEY` now carries the local one |
+| `bedrock/converse/` ARN smoke test | **Done** - `ipr-nova` *is* the ARN route (`bedrock/converse/arn:aws:bedrock:...:default-prompt-router/amazon.nova:1`). 60/60 HTTP 200 at soak rate, p95 1891ms |
+| The **hotspot** run | Run 4 ran on a phone hotspot, but under the circuit-breaker bug, so it does not count as clean. A post-fix hotspot run is the one remaining item |
 
-**The second run and the hotspot run remain a genuine gate that has not been
-cleared.** A single clean run against a mock provider on office wifi proves
-considerably less than the brief asks for.
+### Still genuinely open
+
+- **A clean hotspot run.** Run 4 was on a hotspot but was poisoned by the
+  disabled-arm bug. Needs re-running on the phone hotspot now that the fix is
+  in.
+- **`infra/teardown.sh` has never been executed.** It cannot be tested without
+  destroying the stack the talk runs on. It is reviewed, not verified - run it
+  only after the talk.
+- **Backup recordings.** `handoff/recording-shotlist.md` lists the shots; the
+  videos need a human at the keyboard.
 
 ---
 
