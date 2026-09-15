@@ -91,7 +91,7 @@ def main() -> int:
     p = Path(a.out)
     st.save(p)
     print(f"\nwritten to {p}")
-    print("Load it with:  cp %s router/state/posteriors.json" % p)
+    print(f"Load it with:  cp {p} router/state/posteriors.json")
     print("then restart the gateway, or let the dashboard pick it up.")
     return 0
 
