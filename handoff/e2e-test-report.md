@@ -1,8 +1,24 @@
 # End-to-end test report
 
-**Gate status: CLEARED.** Seven runs. The two that clear the gate are the last
-two, both against the **deployed AWS stack** (Amplify -> CloudFront -> ALB ->
-ECS -> Bedrock), both end to end with zero client-visible errors:
+**Gate status: CLEARED.** Eight runs. **Run 8 is the one to read**: it is the
+first run in which *every* demo works on the production URL, because it is the
+first with a real semantic cache on the deployed stack. Runs 6 and 7 cleared
+the gate on everything except Demo 2.
+
+```
+run 8, production URL, 1085s
+  Beat 4  reworded ask 144ms, x-litellm-semantic-similarity: 0.9155
+  Beat 5  discrimination=0.1248 vs 0.1031  separated=True
+          top2 TIED | cost_per_1k leader=0.5181 runnerup=1.6286
+  Beat 6  errors before -> after: 0 -> 0, breaker clean / clean
+  Beat 7  budget BLOCKED after 6 requests, 5s
+  Beat 8  standby answered in 795ms
+```
+
+The cost line is the thesis, measured: at statistically tied quality the router
+took the arm that costs **3.1x less per thousand requests**.
+
+Runs 6 and 7 remain the wired/hotspot pair:
 
 | | Run 6 - office wifi | Run 7 - **phone hotspot** |
 |---|---|---|
@@ -464,6 +480,55 @@ the router takes the cheap one. `claude-haiku` leads on traffic at **2.9x less
 cost per request than `claude-sonnet`** at statistically identical quality. Say
 that, and point at the `gpt-on-bedrock` curve sitting clearly below the pack as
 the thing the router learned to avoid.
+
+---
+
+## Demo 2 did not work on production, and nothing said so
+
+Found by running the demo rather than the harness, the day before the talk.
+
+The deployed config degraded the semantic cache to plain `redis`, because
+ElastiCache for Redis OSS - this stack runs **7.1.0** - has no RediSearch, and
+pointing redisvl at it kills the gateway during startup with nothing in the
+log. Exact-match caching still worked, so the demo *looked* fine: ask the same
+question twice and it is 11x faster. Reword it, which is the entire point of
+Demo 2, and it missed every time.
+
+Measured on the production URL, before:
+
+| ask | wall | cache |
+|---|---|---|
+| first | 0.738s | miss |
+| **same question again** | **0.068s** | hit - exact match only |
+| **reworded** | **1.105s** | **MISS, no similarity header** |
+
+The evidence had been sitting in the run reports the whole time: the two
+**local** runs captured `x-litellm-semantic-similarity` (0.76, 0.915); all six
+**deployed** runs captured none, under a heading that still said "semantic
+cache on a reworded question".
+
+**Fixed by running Redis Stack as a sidecar in the ECS task.** It ships
+RediSearch; the gateway reaches it on `localhost:6379` with no password and no
+TLS, which is the shape redisvl wants; and it cannot start before the sidecar
+answers PING (`dependsOn: HEALTHY`). The image is mirrored into ECR for arm64
+so a live demo never depends on a Docker Hub pull. ElastiCache still backs
+router cooldowns and spend tracking.
+
+Measured on the production URL, after:
+
+| ask | wall | similarity | answer |
+|---|---|---|---|
+| cold, never asked before | 0.864s | - | Ljubljana |
+| **reworded** | **0.127s** | **0.9496** | Ljubljana - **6.8x faster** |
+| a *different* country | 0.677s | **0.0** | **Lisbon** - no false hit |
+
+That last row is the one to have ready if the room is sceptical: the threshold
+refuses to serve Slovenia's answer for Portugal.
+
+**Carried by hand:** task definition revision 3 was registered manually. It
+will **not** survive a re-run of the guidance's deploy script, which would
+revert the service to a task definition with no sidecar - and Demo 2 would
+silently go back to exact-match.
 
 ---
 

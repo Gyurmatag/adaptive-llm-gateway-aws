@@ -34,7 +34,8 @@ All from `handoff/e2e-test-report.md`, local stack, mock provider.
 | Demo 4, kill switch | **0.09s** to fire | - | - |
 | Demo 4, killed arm to 0% of traffic | **8s** | - | Visible almost immediately |
 | Demo 4, full re-sort to 85% | **32s** | 90s | Fits, and wants silence not filler |
-| Demo 5, budget block | **4-5s**, blocks after 3-5 requests | 10s | Fits. **Not a 429** - see below |
+| Demo 2 on PRODUCTION, reworded | **0.864s -> 0.127s**, similarity 0.9496 | 60s | **6.8x**. Needs the Redis Stack sidecar |
+| Demo 5, budget block | **4-6s**, blocks after 3-6 requests | 10s | Fits. **Not a 429** - see below |
 | Fallback switch | **614ms / 622ms** (runs 5, 6) | - | Effectively instant |
 
 **The important number is Demo 2's 385ms -> 40ms.** That ratio is the beat. It

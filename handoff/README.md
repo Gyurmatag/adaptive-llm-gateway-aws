@@ -17,7 +17,7 @@ the wording of the motif marker on the routing layer.
 | `architecture.md` | Slides 12 and 20 | **Ready.** Updated to what actually deployed, which differs from the plan in four ways. |
 | `deploy-lessons.md` | Slide 19 first half | **Ready.** Pick 2-3; `infra/DEPLOY.md` has twelve with verbatim errors. |
 | `demo-timings.md` | Run of show | **Measured.** |
-| `e2e-test-report.md` | **Blocking gate** | **Cleared.** Seven runs; runs 6 and 7 both clean end to end against the deployed stack, run 7 over a phone hotspot. Zero errors across the failover in both. |
+| `e2e-test-report.md` | **Blocking gate** | **Cleared.** Eight runs. Run 8 is the one to read: the first in which **every demo works on the production URL**, after the semantic cache was fixed with a Redis Stack sidecar. Runs 6 (wired) and 7 (phone hotspot) cleared everything else. Zero errors across the failover in all three. |
 | `preflight-checklist.md` | Pre-flight | **Ready.** |
 | `recording-shotlist.md` | Backup videos | **Ready** - but the recordings themselves need a human. |
 | `repo-url.txt` | Slide 21 QR | **Ready. PUBLIC.** CI green. |

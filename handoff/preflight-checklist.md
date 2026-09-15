@@ -74,6 +74,37 @@ needs a look before the deck uses it.
 
 ---
 
+## Before anything else: two environment facts
+
+1. **Set the locale.** `LANG` and `LC_ALL` are unset on the demo machine. With
+   no locale, zsh mangles non-ASCII bytes when you capture curl output into a
+   shell variable - `character not in range`, three times out of nine. In front
+   of a Hungarian audience, accented characters are exactly what triggers it.
+
+   ```bash
+   export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
+   ```
+
+   Also: pipe curl straight into `python3`, never through a shell variable.
+
+2. **Demo 2 depends on a hand-registered task definition.** The semantic cache
+   runs as a Redis Stack sidecar added in `litellm-stack-fargate-task:3`,
+   registered by hand. Re-running the guidance's deploy script reverts the
+   service to a task definition with no sidecar, and Demo 2 silently drops back
+   to exact-match: repeating a question still looks fast, rewording one misses.
+   Confirm before the talk:
+
+   ```bash
+   curl -sS -D- -o /dev/null -X POST "$GATEWAY_BASE_URL/v1/chat/completions" \
+     -H "Authorization: Bearer $LITELLM_MASTER_KEY" -H 'Content-Type: application/json' \
+     -d '{"model":"nova-lite","messages":[{"role":"user","content":"Which city is Slovenia'"'"'s capital?"}],"max_tokens":80}' \
+     | grep -i semantic-similarity
+   ```
+
+   It must print a similarity. If it prints nothing, the sidecar is gone.
+
+---
+
 ## The three items that are not on the original list but should be
 
 1. **Confirm the gateway logs `[thompson] installed` after every restart.** If
