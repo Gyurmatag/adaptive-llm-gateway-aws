@@ -1,15 +1,18 @@
 # End-to-end test report
 
-**Gate status: PARTIALLY CLEARED.** Two full 17-minute runs executed with real
-measured numbers and captured output:
+**Gate status: PARTIALLY CLEARED.** Three full runs executed with real measured
+numbers and captured output:
 
 - **Run 1** - local gateway, mock provider. Proves the plumbing.
-- **Run 2** - local gateway, **real Amazon Bedrock in eu-central-1**. Proves
-  the demo against the models that will actually be on stage.
+- **Run 2** - local gateway, **real Amazon Bedrock in eu-central-1**.
+- **Run 3** - the **deployed AWS stack**: Amplify -> CloudFront -> ALB -> ECS
+  -> Bedrock. The topology that will be on stage.
 
-**Still NOT executed:** any run against the **deployed ECS stack**, the
-**hotspot** run, Demo 5 (budget key), and the fallback drill. The ECS
-deployment was in progress when this report was written.
+**Still NOT executed: the hotspot run.** It needs the machine moved onto a
+mobile hotspot, which is a physical act this build could not perform. Given
+that the office network dropped out completely during this build - taking a
+Terraform apply and a git push with it - that gate matters more than usual and
+remains genuinely open.
 
 Everything below is measured, not asserted. Nothing here is simulated or
 extrapolated.
@@ -34,6 +37,116 @@ semantic cache, spend accounting, the dashboard and the SSE stream are all the
 real code paths. Only the model text and its latency are synthetic. What is
 NOT exercised: Bedrock's real latency, the `bedrock/converse/` ARN route, real
 token accounting, and the ALB.
+
+---
+
+## Run 3 - the deployed AWS stack
+
+The topology that will be on stage. `https://<cloudfront>/` in front of the
+ALB, ECS Fargate, one task, Bedrock in eu-central-1.
+
+### Convergence - the first run to pass the strict test
+
+```
+leader=claude-sonnet  gap=0.0539  sd_sum=0.0472  separated=True  minobs=103
+```
+
+**This is the only run where the posteriors separated on the strict criterion**
+(leader clear of runner-up by more than the sum of their standard deviations),
+with every arm at 103 or more real observations. Runs 1 and 2 did not reach it.
+
+### Demo 1 - through CloudFront, ALB and ECS
+
+```
+claude-sonnet    1375 ms
+gpt-on-bedrock    363 ms
+nova-lite         725 ms
+```
+
+Streaming: **24 chunks in 770 ms** through the ALB.
+**SSE through CloudFront: first byte at 0.06s, not buffered.**
+
+### Demo 2 - DOES NOT WORK on the deployed stack
+
+```
+first ask:    640ms
+reworded ask: 591ms
+x-litellm-semantic-similarity: NOT PRESENT
+```
+
+Expected, and not a defect to fix: ElastiCache has no RediSearch, so the
+semantic cache cannot run there at all. **Demo 2 must be run against the local
+standby.** See infra/DEPLOY.md.
+
+### Demo 4 - worked only after two failures worth recording
+
+The first two attempts **reported success and did nothing**:
+
+```
+leader before -> after: claude-haiku -> claude-haiku
+killed arm rolling share after the "kill": 26%
+errors: 0        <- because nothing had happened
+```
+
+Two independent causes, both invisible:
+
+1. The circuit breaker is a FILE in the gateway's state directory. Locally
+   that is a bind mount; on ECS the task shares no filesystem with the laptop,
+   so the switch was thrown on the wrong machine. Fixed with master-key
+   protected admin endpoints mounted inside the gateway process
+   (`POST /dash/admin/disable`).
+2. The service was running **two** ECS tasks, so the admin POST reached one
+   while the other kept serving. A hand-applied autoscaling pin does not
+   survive `terraform apply` - it must be set in `MAX_CAPACITY`.
+
+Verified working, single task, deployed stack:
+
+| | |
+|---|---|
+| kill switch | **0.18s** |
+| killed arm share (window 250) | 42% -> 38% -> 31% -> 21% -> 17% -> **0%** at t+65s |
+| leader | `gpt-on-bedrock` -> `claude-haiku` |
+| **errors** | **0 throughout** |
+
+Re-measured after tuning the rolling window to 150, single task, deployed:
+
+| | |
+|---|---|
+| killed arm | `claude-haiku`, 36% of traffic and the leader |
+| t+15s | 13% |
+| t+30s | 2% |
+| t+45s | **0%** |
+| **errors** | **0 throughout** |
+
+45s to fully resolve inside a 90s beat, against 65s before the change.
+Capture: `handoff/dashboard-deployed-failover.png`, taken from the live
+Amplify URL.
+
+### Demo 5 - budget enforcement confirmed, script reporting wrong
+
+```
+budget_exceeded | Budget has been exceeded!
+Current cost: 0.00174795, Max budget: 0.0005
+```
+
+Enforcement works. The rehearsal script logged `HTTP 200` for it, which is a
+reporting bug in the harness, not a gateway failure. **Still a 400, not a 429.**
+
+### Fallback drill - NOT VALID this run
+
+`standby did NOT answer`. The local stack had been repointed at the deployed
+config, so there was no second gateway to fall back to. The mechanism is one
+environment variable and is exercised by every script via `ENV_FILE`, but the
+deployed-to-local switch has still not been timed.
+
+### Honest caveats on this run
+
+- The soak was **~14 clean minutes, not 17**. `reset_demo.sh` forced a new ECS
+  task and returned while the previous one was still draining, so the first
+  three minutes of traffic went to a task that then died. Fixed, but this run
+  carries the shortfall.
+- `handoff/dashboard-deployed.png` is captured from the **live Amplify URL**
+  against this stack: 1300 requests, $2.29 saved (74%), zero errors.
 
 ---
 
