@@ -103,6 +103,18 @@ calls `litellm.embedding()` directly rather than through the Router.
   docker buildx imagetools inspect --format '{{.Image.Platform}}' "$REPO:$TAG"
   ```
 
+  **The root cause is worth a sentence on stage.** Nobody chose ARM64. The
+  guidance's `.env` ships `CPU_ARCHITECTURE=""` with the comment *"If empty,
+  defaults to the architecture of your deployment machine"* - so the task
+  definition's architecture was decided by the laptop that ran the deploy. Ship
+  the same repo from an x86 CI runner and the task comes back X86_64, at which
+  point the arm64 image that worked yesterday fails with `exec format error`
+  and nothing in the diff explains why. Set it explicitly:
+
+  ```bash
+  CPU_ARCHITECTURE="arm"   # infra/upstream/.env - never leave this inferred
+  ```
+
 ---
 
 ## The honest framing for the beat

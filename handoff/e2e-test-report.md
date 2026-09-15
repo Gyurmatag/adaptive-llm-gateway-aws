@@ -548,9 +548,29 @@ longer true and the items are kept here only so the history is legible:
 - **A clean hotspot run.** Run 4 was on a hotspot but was poisoned by the
   disabled-arm bug. Needs re-running on the phone hotspot now that the fix is
   in.
-- **`infra/teardown.sh` has never been executed.** It cannot be tested without
-  destroying the stack the talk runs on. It is reviewed, not verified - run it
-  only after the talk.
+- **`infra/teardown.sh` still cannot be executed** without destroying the stack
+  the talk runs on, but every step of it has now been dry-run read-only, and
+  that caught two defects that would have left the demo billing:
+
+  1. **The prompt-router deletion was a silent no-op.** It hunted for
+     `awsday-gateway-claude` / `awsday-gateway-nova`, which were never created -
+     the demo uses the account's AWS-managed *default* prompt routers. The loop
+     matched nothing and printed nothing, which read as "cleaned up".
+  2. **The add-on `terraform destroy` guarded on the `.terraform` directory**,
+     which `init` creates whether or not anything was applied. With an empty
+     state it failed with nine `No value for required variable` errors, printed
+     `(add-on destroy reported errors)` and carried on.
+
+  Verified working: `undeploy.sh` is present and executable, its two
+  prerequisites (`infra/upstream/config/config.yaml` and `infra/upstream/.env`)
+  both exist, `LITELLM_VERSION` and `CERTIFICATE_ARN` are set, and the Amplify
+  lookup resolves the real app id. The `$150` budget `awsday-gateway-monthly`
+  exists and is deliberately left in place.
+
+  One caveat for whoever runs it: upstream's `undeploy.sh` echoes every
+  provider API key to stdout. All 22 are empty placeholders in this deployment,
+  so nothing leaks here - but do not paste its output anywhere if that ever
+  changes.
 - **Backup recordings.** `handoff/recording-shotlist.md` lists the shots; the
   videos need a human at the keyboard.
 
