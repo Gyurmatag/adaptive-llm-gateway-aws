@@ -1,17 +1,30 @@
-PENDING - Amplify deployment blocked on AWS credentials.
+https://main.d2pprg16lxvrri.amplifyapp.com
 
-The dashboard is built, verified and committed (dashboard-web/). It builds
-fully static, which is what Amplify needs, and has been run end to end against
-the live data plane locally at http://localhost:3000.
+STATUS: LIVE. Verified HTTP 200 and serving the branded dashboard.
 
-Once credentials exist:
-  1. amplify.yml at the repo root is the build spec (already written)
-  2. Set NEXT_PUBLIC_DATA_PLANE_URL on the Amplify branch to the ALB origin.
-     It is inlined at BUILD time, so changing it needs a rebuild, not a
-     redeploy, and it must never be localhost.
-  3. Set DASHBOARD_CORS_ORIGIN on the ECS dashboard service to the exact
-     Amplify origin. Never "*".
-  4. Write the resulting https://<branch>.<appid>.amplifyapp.com URL here.
+Hosting: AWS Amplify Hosting, app "awsday-gateway-dashboard", branch "main",
+region eu-central-1. Deployed by MANUAL (zip) deployment, not a GitHub
+connection - connecting Amplify to GitHub needs an OAuth grant, and a manual
+deployment needs nothing but credentials.
 
-Pre-flight depends on this: open it from the venue network and confirm the SSE
-stream connects through the ALB and the curves move.
+The app is a FULLY STATIC Next.js export (output: "export"). That is better
+than it sounds: dashboard-brief.md section 2 works around Amplify not
+supporting Next.js streaming by keeping the live path off the compute
+provider. A static export removes the compute provider from the picture
+entirely, so the constraint cannot bite at all.
+
+REBUILD REQUIRED when the data plane URL changes:
+  cd dashboard-web
+  NEXT_PUBLIC_DATA_PLANE_URL=<https origin> npm run build
+  cd out && zip -qr /tmp/dash.zip . && cd ..
+  # then create-deployment / PUT the zip / start-deployment
+
+NEXT_PUBLIC_* is inlined at BUILD time, so changing the origin needs a
+rebuild, not just a redeploy.
+
+OPEN ITEM - the data plane origin must be HTTPS.
+An https Amplify page cannot fetch an http origin; the browser blocks it as
+mixed content. The upstream ALB is http-only, so the data plane has to be
+reached through the stack's CloudFront distribution (https) rather than the
+ALB directly. Note that CloudFront must be configured with caching DISABLED
+on the SSE path or it will buffer the stream.
