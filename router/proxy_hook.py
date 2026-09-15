@@ -187,11 +187,21 @@ class ThompsonInstaller(CustomLogger):
             start = time.perf_counter()
             try:
                 response = await original(*args, **kwargs)
-            except Exception:
+            except Exception as exc:
+                # CLIENT-VISIBLE errors only.
+                #
+                # Router.acompletion handles retries, cooldowns and the whole
+                # fallback chain internally, so an exception escaping HERE is
+                # one the caller actually saw. Bedrock throttles that were
+                # absorbed by a fallback never reach this point, and counting
+                # them would be wrong: a 52%-throttled run where every client
+                # request succeeded is a working gateway, not a broken one.
                 from router.rewards import audit as _audit
                 from router.state import STATE as _S
                 _S.total_errors += 1
-                _audit({"event": "failure", "arm": kwargs.get("model", "?")})
+                _audit({"event": "client_error",
+                        "model": kwargs.get("model", "?"),
+                        "error": f"{type(exc).__name__}: {exc}"[:200]})
                 raise
 
             try:

@@ -19,6 +19,19 @@ else
   git clone --depth 1 --branch "$REF" "$REPO" upstream
 fi
 
+# Bake this repo's router into the gateway image and hand the upstream stack
+# our model fleet. Both are copied on every fetch so an upstream update cannot
+# silently drop them.
+echo "==> layering the custom router into the gateway image"
+cp gateway.Dockerfile upstream/Dockerfile
+mkdir -p upstream/config
+cp ../config/config.yaml upstream/config/config.yaml
+
+# deploy.sh builds from the upstream directory, so the router has to be inside
+# that build context.
+rm -rf upstream/router && cp -R ../router upstream/router
+rm -rf upstream/router/state && mkdir -p upstream/router/state
+
 echo
 echo "==> upstream ready at infra/upstream"
 echo "    Deploy with: cd infra/upstream && ./deploy.sh"

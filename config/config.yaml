@@ -253,10 +253,15 @@ litellm_settings:
     semantic_cache_scope: end_user
 
   # proxy_hook installs the Thompson strategy onto the proxy's Router at
-  # startup; rewards feed the posteriors from the success/failure callbacks.
+  # startup and wraps acompletion for the reward path.
+  #
+  # success_callback / failure_callback are deliberately NOT registered.
+  # success_callback never fires on the proxy's routed path in this build, and
+  # failure_callback fires on every internal ATTEMPT - including ones LiteLLM
+  # then retries or falls back from successfully. Counting those as errors put
+  # 189 "errors" on the dashboard during a run where all 360 client requests
+  # succeeded, which would have destroyed Demo 4's whole claim.
   callbacks: ["router.proxy_hook.instance"]
-  success_callback: ["router.rewards.on_success"]
-  failure_callback: ["router.rewards.on_failure"]
 
   # Never log prompt/response bodies. The demo account is throwaway but the
   # repo is public and the habit matters more than this deployment.

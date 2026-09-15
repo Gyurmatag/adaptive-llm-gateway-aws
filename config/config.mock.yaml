@@ -161,8 +161,6 @@ litellm_settings:
   # proxy_hook installs the Thompson strategy onto the proxy's Router at
   # startup; rewards feed the posteriors from the success/failure callbacks.
   callbacks: ["router.proxy_hook.instance"]
-  success_callback: ["router.rewards.on_success"]
-  failure_callback: ["router.rewards.on_failure"]
   turn_off_message_logging: true
   drop_params: true
 
