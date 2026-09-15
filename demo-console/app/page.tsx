@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Chat } from "@/components/Chat";
 import { DemoFanout, DemoCache, DemoKill, DemoBudget } from "@/components/Demos";
+import { Decisions } from "@/components/Decisions";
 import { Stat } from "@/components/ui";
 import { api } from "@/lib/base";
 
@@ -12,6 +13,7 @@ const TABS = [
   { id: "d2", label: "Demo 2 · cache" },
   { id: "d4", label: "Demo 4 · kill" },
   { id: "d5", label: "Demo 5 · budget" },
+  { id: "log", label: "Decisions · live log" },
 ] as const;
 
 export default function Page() {
@@ -87,6 +89,7 @@ export default function Page() {
         {tab === "d2" && <DemoCache />}
         {tab === "d4" && <DemoKill onChange={refresh} />}
         {tab === "d5" && <DemoBudget />}
+        {tab === "log" && <Decisions />}
       </div>
     </main>
   );

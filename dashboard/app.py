@@ -259,6 +259,60 @@ async def get_state():
     return JSONResponse(snapshot())
 
 
+def _tail_jsonl(path: Path, limit: int) -> list[dict]:
+    """Last `limit` parsed lines of a JSONL file, newest last.
+
+    Seeks from the end rather than reading the file, because the audit log
+    grows for the whole talk and re-reading it on every poll would put the
+    dashboard's own cost on the demo.
+    """
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return []
+    # ~220 bytes a line in practice; take a generous slice and keep the tail.
+    window = min(size, max(limit * 400, 8192))
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(size - window)
+            chunk = fh.read().decode("utf-8", "replace")
+    except OSError:
+        return []
+    lines = chunk.splitlines()
+    if window < size and lines:
+        lines = lines[1:]          # first line is probably truncated
+    out = []
+    for ln in lines[-limit:]:
+        ln = ln.strip()
+        if not ln:
+            continue
+        try:
+            out.append(json.loads(ln))
+        except json.JSONDecodeError:
+            continue
+    return out
+
+
+@app.get("/audit")
+async def get_audit(limit: int = 60, event: str | None = None):
+    """Every routing decision and why it was made.
+
+    'The router changed its mind' is not an answer for a risk committee, so the
+    reason is recorded per request - thompson, cold_start_exploration,
+    session_affinity, operator_pin, snapshot - alongside the sampled theta and
+    the cost-adjusted score for every arm that was considered.
+
+    No prompt or completion text is ever written here, which is why this is
+    readable without the master key, exactly like /state.
+    """
+    path = Path(os.environ.get("ROUTER_AUDIT_PATH", str(STATE_PATH.parent / "audit.jsonl")))
+    rows = _tail_jsonl(path, max(1, min(limit, 500)))
+    if event:
+        wanted = {e.strip() for e in event.split(",") if e.strip()}
+        rows = [r for r in rows if r.get("event") in wanted]
+    return JSONResponse({"ts": time.time(), "count": len(rows), "entries": rows})
+
+
 @app.get("/spend")
 async def get_spend():
     return JSONResponse(spend())
