@@ -40,3 +40,4 @@ loadgen/results/
 .DS_Store
 handoff/recordings/
 .venv/
+config/.env.deployed

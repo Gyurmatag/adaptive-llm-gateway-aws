@@ -8,7 +8,12 @@
 # stage and far easier to narrate.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-[ -f config/.env ] && set -a && . config/.env && set +a
+# ENV_FILE selects the target stack: config/.env is the local standby,
+# config/.env.deployed is the AWS stack. Without this the scripts always
+# sourced config/.env and silently reset the LOCAL gateway while reporting
+# success against the deployed one.
+ENV_FILE="${ENV_FILE:-config/.env}"
+[ -f "$ENV_FILE" ] && set -a && . "$ENV_FILE" && set +a
 
 BASE="${GATEWAY_BASE_URL:-http://localhost:4000}"
 KEY="${LITELLM_MASTER_KEY:?LITELLM_MASTER_KEY not set}"

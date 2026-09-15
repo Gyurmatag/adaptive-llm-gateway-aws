@@ -10,13 +10,44 @@
 #   4. router posteriors, audit log and shadow log
 set -euo pipefail
 cd "$(dirname "$0")/.."
-[ -f config/.env ] && set -a && . config/.env && set +a
+# ENV_FILE selects the target stack: config/.env is the local standby,
+# config/.env.deployed is the AWS stack. Without this the scripts always
+# sourced config/.env and silently reset the LOCAL gateway while reporting
+# success against the deployed one.
+ENV_FILE="${ENV_FILE:-config/.env}"
+[ -f "$ENV_FILE" ] && set -a && . "$ENV_FILE" && set +a
 
 BASE="${GATEWAY_BASE_URL:-http://localhost:4000}"
 KEY="${LITELLM_MASTER_KEY:?LITELLM_MASTER_KEY not set}"
 BUDGET_KEY_ALIAS="${BUDGET_KEY_ALIAS:-demo-budget-key}"
 
 echo "==> resetting demo state against $BASE"
+
+# --- 0. remote stack? recycle the task, the sentinels cannot reach it ---------
+# The circuit breaker and the reset sentinel are FILES in the gateway's own
+# filesystem. That works for the local compose stack, where the state dir is a
+# bind mount, and cannot work for ECS, where the task shares no filesystem with
+# this laptop. For a remote gateway the equivalent of "reset to priors" is a
+# fresh task: the posteriors are in-process, so a task replacement IS the reset.
+case "$BASE" in
+  http://localhost*|http://127.0.0.1*) REMOTE=0 ;;
+  *) REMOTE=1 ;;
+esac
+
+if [ "$REMOTE" = "1" ]; then
+  CLUSTER="${ECS_CLUSTER:-litellm-stack-cluster}"
+  SERVICE="${ECS_SERVICE:-LiteLLMService}"
+  echo "  - remote gateway: forcing a new ECS task (this IS the state reset)"
+  if aws ecs update-service --cluster "$CLUSTER" --service "$SERVICE" \
+       --force-new-deployment >/dev/null 2>&1; then
+    echo "    waiting for the service to stabilise (~2-4 min)"
+    aws ecs wait services-stable --cluster "$CLUSTER" --services "$SERVICE" 2>/dev/null \
+      && echo "    service stable, posteriors at priors" \
+      || echo "    !! service did not stabilise in time - check before running" >&2
+  else
+    echo "    !! could not force a new deployment; is AWS_PROFILE set?" >&2
+  fi
+fi
 
 # --- 1. close the circuit breaker ---------------------------------------------
 STATE_DIR="${ROUTER_STATE_DIR:-router/state}"
@@ -85,6 +116,9 @@ fi
 # does nothing: the gateway rewrites it from memory a second later. The
 # sentinel is picked up by the installer watchdog inside the gateway, which
 # resets in-memory state and clears the logs.
+if [ "${REMOTE:-0}" = "1" ]; then
+  echo "  - posteriors already reset by the task replacement above"
+else
 echo "  - signalling the gateway to reset its posteriors"
 STATE_DIR="${ROUTER_STATE_DIR:-router/state}"
 mkdir -p "$STATE_DIR" && touch "$STATE_DIR/RESET"
@@ -98,6 +132,8 @@ if [ -f "$STATE_DIR/RESET" ]; then
   echo "       aws ecs update-service --cluster <c> --service <s> --force-new-deployment" >&2
 else
   echo "    posteriors reset to priors"
+fi
+
 fi
 
 DASH="${DASHBOARD_BASE_URL:-http://localhost:8080}"
