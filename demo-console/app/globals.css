@@ -1,0 +1,54 @@
+@import "tailwindcss";
+
+/* The deck's tokens, not a second visual language. Red is a scalpel: the
+   leading model, and the one thing that went wrong. If three things are red,
+   two of them are mistakes. */
+:root {
+  --sf-canvas: #fffaf6;
+  --sf-navy: #0e1126;
+  --sf-warm-gray: #efeae6;
+  --sf-red: #e51f40;
+  --sf-gray: #5f606d;
+  --sf-rule: #e2dbd4;
+  --sf-panel: #ffffff;
+  --sf-good: #0f7a4d;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --sf-canvas: #0b0e1f;
+    --sf-navy: #f4f1ec;
+    --sf-warm-gray: #161a30;
+    --sf-red: #ff5470;
+    --sf-gray: #a0a3b8;
+    --sf-rule: #262b45;
+    --sf-panel: #12162a;
+    --sf-good: #4ade80;
+  }
+}
+
+@theme inline {
+  --color-canvas: var(--sf-canvas);
+  --color-navy: var(--sf-navy);
+  --color-warm-gray: var(--sf-warm-gray);
+  --color-brand-red: var(--sf-red);
+  --color-muted-ink: var(--sf-gray);
+  --color-rule: var(--sf-rule);
+  --color-panel: var(--sf-panel);
+  --color-good: var(--sf-good);
+  --font-display: var(--font-bricolage);
+  --font-body: var(--font-manrope);
+}
+
+html, body {
+  background: var(--sf-canvas);
+  color: var(--sf-navy);
+}
+body { font-family: var(--font-manrope), ui-sans-serif, system-ui, sans-serif; }
+
+/* Projector legibility: nothing under 14px, and numbers line up. */
+.tabular { font-variant-numeric: tabular-nums; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
