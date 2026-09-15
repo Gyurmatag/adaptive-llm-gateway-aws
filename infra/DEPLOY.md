@@ -232,9 +232,29 @@ Virtual key budgets are enforced, but the response is:
            "type": "budget_exceeded", "code": "400"}}
 ```
 
-**HTTP 400 with `type: budget_exceeded`.** The talk plan says the key "starts
-returning 429". It does not. Saying 429 from the stage would be contradicted by
-the screen behind you.
+**The status code differs between the two stacks.** Measured, same key, same
+budget, same request:
+
+```
+local gateway     HTTP 400  {"error":{"type":"budget_exceeded", ...}}
+deployed gateway  HTTP 200  {"error":{"type":"budget_exceeded", ...}}
+```
+
+The deployed stack routes `/v1/chat/completions` through the guidance's
+**middleware container** (the ALB has an explicit rule for that path), and the
+middleware passes the error body through with a 200. So:
+
+- **Never say 429.** The talk plan claims 429; neither stack returns it.
+- **Show the JSON body, not the status code.** On the deployed stack the
+  status is 200 and pointing at it undercuts the beat.
+- A harness that loops until it sees a non-200 never terminates against the
+  deployed stack. `scripts/e2e_rehearsal.sh` detects
+  `error.type == "budget_exceeded"` instead.
+
+**And the requests must bypass the cache.** With exact-match caching on, a
+repeated identical prompt is served from cache, costs nothing, and the key
+never approaches its ceiling - measured: 250 identical requests moved the
+recorded spend by about 21 requests' worth, and the key never blocked.
 
 Also worth knowing before choosing a number: measured cost on this fleet is
 roughly **$0.000046 per request**, so a literal $5 budget needs about 100,000

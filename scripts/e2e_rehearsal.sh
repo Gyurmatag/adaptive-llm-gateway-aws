@@ -185,38 +185,57 @@ log ""
 
 # ------------------------------------------------------------- beat 7 demo 5
 log "## Beat 7 - Demo 5: budget key hits its ceiling"
-# NOTE: LiteLLM returns HTTP 400 with type "budget_exceeded", NOT 429. The talk
-# plan says 429; do not say that on stage, the screen will contradict you.
+# The budget block must be detected from the BODY, not the status code.
+#
+#   local gateway    -> HTTP 400 with {"error":{"type":"budget_exceeded"}}
+#   deployed gateway -> HTTP *200* with the same error body
+#
+# The deployed stack routes /v1/chat/completions through the guidance's
+# middleware container, which passes the error through with a 200. A harness
+# that waits for a non-200 never terminates there, and a speaker who points at
+# the status code is pointing at the wrong thing. Show the JSON.
+#
+# Requests must also send cache.no-cache: with exact-match caching on, a
+# repeated identical prompt is served from cache, costs nothing, and the key
+# never approaches its ceiling.
 BK="${BUDGET_KEY:-}"
 if [ -z "$BK" ]; then
-  BK="$(curl -sS -X POST "$BASE/key/generate" -H "Authorization: Bearer $KEY" \
+  BK="$(curl -sS -m 20 -X POST "$BASE/key/generate" -H "Authorization: Bearer $KEY" \
         -H 'Content-Type: application/json' \
-        -d "{\"key_alias\":\"demo-budget-key-$(date +%s)\",\"max_budget\":${BUDGET_USD:-0.0005},\"models\":[\"${LOADGEN_MODEL:-demo-router}\"]}" 2>/dev/null \
+        -d "{\"key_alias\":\"demo-budget-$(date +%s)\",\"max_budget\":${BUDGET_USD:-0.0002},\"models\":[\"${LOADGEN_MODEL:-demo-router}\"]}" 2>/dev/null \
         | $PY -c "import json,sys;print(json.load(sys.stdin).get('key',''))" 2>/dev/null)"
 fi
 if [ -n "$BK" ]; then
-  B=$(date +%s); N=0; CODE=200; BODY=""
-  while [ "$N" -lt 300 ] && [ "$CODE" = "200" ]; do
-    CODE=$(curl -sS -o /tmp/bk_resp.json -w '%{http_code}' -X POST "$BASE/v1/chat/completions" \
+  B=$(date +%s); N=0; BLOCKED=0; CODE=""
+  while [ "$N" -lt 300 ] && [ "$BLOCKED" = "0" ]; do
+    CODE=$(curl -sS -m 60 -o /tmp/bk_resp.json -w '%{http_code}' -X POST "$BASE/v1/chat/completions" \
       -H "Authorization: Bearer $BK" -H 'Content-Type: application/json' \
       -d "{\"model\":\"${LOADGEN_MODEL:-demo-router}\",\"messages\":[{\"role\":\"user\",\"content\":\"Write three sentences about databases.\"}],\"max_tokens\":300,\"cache\":{\"no-cache\":true}}" 2>/dev/null)
     N=$((N+1))
-  done
-  BODY=$($PY -c "
+    BLOCKED=$($PY -c "
 import json
 try:
     d=json.load(open('/tmp/bk_resp.json'))
-    e=d.get('error') or {}
-    print('%s | %s' % (e.get('type','?'), (e.get('message') or '')[:160]))
+    print(1 if (d.get('error') or {}).get('type')=='budget_exceeded' else 0)
+except Exception: print(0)" 2>/dev/null)
+  done
+  MSG=$($PY -c "
+import json
+try:
+    d=json.load(open('/tmp/bk_resp.json')); e=d.get('error') or {}
+    print('%s | %s' % (e.get('type','?'), (e.get('message') or '')[:140]))
 except Exception: print('(unparseable)')" 2>/dev/null)
-  log "- blocked with HTTP \`$CODE\` after $N requests, $(( $(date +%s) - B ))s"
-  log "- error type and message:"
-  log "  \`\`\`"
-  log "  $BODY"
-  log "  \`\`\`"
-  if [ "$CODE" = "400" ]; then
-    log "- **NOTE: this is a 400 \`budget_exceeded\`, NOT a 429.** The talk plan"
-    log "  says 429. Do not say 429 on stage."
+  if [ "$BLOCKED" = "1" ]; then
+    log "- **BLOCKED** after $N requests, $(( $(date +%s) - B ))s"
+    log "- transport status: \`HTTP $CODE\` - note this is 200 on the deployed"
+    log "  stack (the middleware passes the error through) and 400 locally."
+    log "  **Detect the body, not the status. Do not say 429 on stage.**"
+    log "  \`\`\`"
+    log "  $MSG"
+    log "  \`\`\`"
+  else
+    log "- **NOT BLOCKED** after $N requests. Last body: $MSG"
+    log "  Check that requests sent cache.no-cache - a cached repeat costs nothing."
   fi
 else
   log "- **SKIPPED**: could not create a budget key."
