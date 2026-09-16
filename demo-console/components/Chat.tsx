@@ -64,10 +64,30 @@ export function Chat() {
       <Panel className="flex min-h-[340px] flex-col">
         <div className="flex-1 space-y-4 overflow-y-auto p-5">
           {messages.length === 0 && (
-            <p className="max-w-[54ch] text-[15px] text-muted-ink">
-              One endpoint, every model. Ask something, then switch who answers with the
-              buttons above — the request shape never changes.
-            </p>
+            // The explanation box above already says what this is for. Repeating
+            // it here wasted the one part of the panel that could be useful, so
+            // this is a way in instead: one click and something is on screen.
+            <div>
+              <p className="text-[13px] uppercase tracking-[0.1em] text-muted-ink">
+                Try one of these
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {[
+                  "Explain database indexes in one sentence.",
+                  "Write a Python function that reverses a list.",
+                  "What is the capital of Hungary?",
+                ].map((q) => (
+                  <button
+                    key={q}
+                    type="button"
+                    onClick={() => { if (!busy) sendMessage({ text: q }, { body: { model } }); }}
+                    className="rounded-sm border border-rule px-3 py-2 text-left text-[14px] text-navy transition-colors hover:border-navy"
+                  >
+                    {q}
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
           {messages.map((m) => {
             const text = m.parts
