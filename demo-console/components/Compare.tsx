@@ -21,6 +21,15 @@ export function Compare() {
   const [prompt, setPrompt] = useState(PRESETS[0]);
   const [res, setRes] = useState<any>(null);
   const [busy, setBusy] = useState(false);
+  const [exp, setExp] = useState<any>(null);
+  const [expBusy, setExpBusy] = useState(false);
+
+  async function runExperiment() {
+    setExpBusy(true); setExp(null);
+    const r = await fetch(api("/api/constrain"), { method: "POST" })
+      .then((x) => x.json()).catch(() => null);
+    setExp(r); setExpBusy(false);
+  }
 
   async function run() {
     setBusy(true); setRes(null);
@@ -94,6 +103,63 @@ export function Compare() {
           />
         </div>
       )}
+
+      {/* The question everyone asks the moment they see the comparison. */}
+      <Panel className="p-5">
+        <h3 className="font-[family-name:var(--font-bricolage)] text-[17px] font-bold">
+          &ldquo;So just give it the same models.&rdquo;
+        </h3>
+        <p className="mt-2 max-w-[62ch] text-[14.5px] text-muted-ink">
+          Reasonable. It does not work, and it is worth proving rather than claiming. This asks
+          the Auto Router five times with a list containing exactly one model, then runs two
+          controls to rule out a malformed request.
+        </p>
+        <div className="mt-4">
+          <Button onClick={runExperiment} disabled={expBusy}>
+            {expBusy ? "Asking seven times…" : "Try to pin it to one model"}
+          </Button>
+        </div>
+
+        {exp?.configured && (
+          <div className="mt-4 border-t border-rule pt-4">
+            <p className="text-[14px] text-navy">
+              Asked for <span className="font-mono">{exp.asked}</span>, five times, via
+              <span className="font-mono"> openrouter/auto</span> with{" "}
+              <span className="font-mono">models:[&quot;{exp.asked}&quot;]</span>:
+            </p>
+            <ul className="mt-2 space-y-1">
+              {exp.auto?.map((r: any, i: number) => (
+                <li key={i} className="font-mono text-[13px]">
+                  <span className={r.model === exp.asked ? "text-good" : "text-brand-red"}>
+                    {r.model ?? r.error}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-3 text-[15px] font-bold text-navy">
+              Honoured {exp.honoured} of {exp.samples}.
+            </p>
+            <div className="mt-4 border-t border-rule pt-3 text-[13.5px] text-muted-ink">
+              <p>Controls, so this is not a malformed request:</p>
+              <p className="mt-1 font-mono text-[13px] text-navy">
+                same list, no auto → {exp.list?.map((r: any) => r.model ?? r.error).join(", ")}
+              </p>
+              <p className="mt-1 font-mono text-[13px] text-navy">
+                model named outright → {exp.pinned?.model ?? exp.pinned?.error}
+              </p>
+            </div>
+            <p className="mt-4 text-[15px] text-navy">
+              You can <b>pin</b> a model. You can give a <b>fallback chain</b> — capped at{" "}
+              {exp.listCap}, and our fleet is {exp.fleetSize}. What you cannot do is point the
+              <b> adaptive</b> part at models you chose. Routing that adapts over your own fleet,
+              on your own quality signal, is the thing that is left to build.
+            </p>
+          </div>
+        )}
+        {exp && !exp.configured && (
+          <p className="mt-3 text-[14px] text-brand-red">No OpenRouter key on this deployment.</p>
+        )}
+      </Panel>
 
       <Panel className="p-5">
         <h3 className="font-[family-name:var(--font-bricolage)] text-[17px] font-bold">
