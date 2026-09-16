@@ -24,12 +24,12 @@ export function Explain({ title, children }: { title: string; children: ReactNod
 /** The one explanation that carries the whole talk. Collapsible, because the
  *  speaker will want it gone after slide 16 and back for questions. */
 export function HowItDecides() {
-  const [open, setOpen] = useState(true);
+  // Closed by default: it is the answer to a question, not the main event.
+  const [open, setOpen] = useState(false);
 
   useEffect(() => {
     try {
-      const v = localStorage.getItem("explain:how");
-      if (v === "0") setOpen(false);
+      if (localStorage.getItem("explain:how") === "1") setOpen(true);
     } catch { /* private window, or storage blocked */ }
   }, []);
 

@@ -3,26 +3,27 @@
 import { useCallback, useEffect, useState } from "react";
 import { Chat } from "@/components/Chat";
 import { DemoFanout, DemoCache, DemoKill, DemoBudget } from "@/components/Demos";
+import { Standings } from "@/components/Standings";
 import { Decisions } from "@/components/Decisions";
 import { Guardrails } from "@/components/Guardrails";
-import { TrafficControl } from "@/components/TrafficControl";
-import { LiveLog } from "@/components/LiveLog";
+import { Roster } from "@/components/Roster";
 import { HowItDecides } from "@/components/Explain";
 import { Stat } from "@/components/ui";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { api } from "@/lib/base";
 
 const TABS = [
-  { id: "chat", label: "Chat" },
   { id: "d1", label: "Demo 1 · every model" },
   { id: "d2", label: "Demo 2 · cache" },
+  { id: "d3", label: "Demo 3 · what it believes" },
   { id: "d4", label: "Demo 4 · kill" },
   { id: "d5", label: "Demo 5 · budget" },
-  { id: "log", label: "Decisions · live log" },
+  { id: "chat", label: "Chat" },
   { id: "guard", label: "Guardrails" },
 ] as const;
 
 export default function Page() {
-  const [tab, setTab] = useState<(typeof TABS)[number]["id"]>("chat");
+  const [tab, setTab] = useState<(typeof TABS)[number]["id"]>("d1");
   const [live, setLive] = useState<{ state: any; spend: any } | null>(null);
 
   const refresh = useCallback(async () => {
@@ -36,6 +37,25 @@ export default function Page() {
     return () => clearInterval(t);
   }, [refresh]);
 
+  // Traffic starts itself when the page is opened. There is nothing to press
+  // and nothing to remember: the curves need a stream of questions to learn
+  // from, and asking a speaker to start it is one more thing to forget on
+  // stage. It stops itself when nobody has had the page open for a while.
+  useEffect(() => {
+    fetch(api("/api/traffic"), { cache: "no-store" })
+      .then((r) => r.json())
+      .then((s) => {
+        if (!s?.running) {
+          return fetch(api("/api/traffic"), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "start", rate: 3 }),
+          });
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   const s = live?.state;
   const sp = live?.spend;
   const offline = !s;
@@ -43,58 +63,46 @@ export default function Page() {
   const withheld: string[] = s?.withheld_arms ?? [];
 
   return (
-    <main className="mx-auto max-w-5xl px-5 py-10">
-      <header className="border-b-2 border-navy pb-5">
-        <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-muted-ink">
-          AWS Community Day CEE · live against production
-        </p>
-        <h1 className="mt-2 font-[family-name:var(--font-bricolage)] text-[clamp(28px,6vw,42px)] font-extrabold leading-none tracking-[-0.02em]">
+    <main className="mx-auto max-w-6xl px-5 py-8">
+      <header className="flex flex-wrap items-end justify-between gap-4 border-b-2 border-navy pb-4">
+        <h1 className="font-[family-name:var(--font-bricolage)] text-[clamp(28px,6vw,40px)] font-extrabold leading-none tracking-[-0.02em]">
           One Endpoint, Every Model
         </h1>
+        <ThemeToggle />
       </header>
 
-      {/* Live strip. The same numbers as the projector, so the speaker never
-          has to turn around to check the state of the stack. */}
-      <div className="mt-5 flex flex-wrap items-center gap-x-10 gap-y-5 rounded-sm border border-rule bg-panel px-5 py-4">
+      {/* Three numbers. Anything else competes with the log. */}
+      <div className="mt-5 flex flex-wrap items-center gap-x-12 gap-y-5">
         <Stat value={offline ? "–" : s.total_requests.toLocaleString()} label="Questions asked" />
         <Stat value={offline ? "–" : s.errors} label="Failed answers" tone={!offline && s.errors === 0 ? "good" : "red"} />
-        <Stat value={sp ? `$${sp.saved_usd.toFixed(2)}` : "–"} label="Saved so far" tone="red" />
-        <Stat value={sp ? `${sp.saved_pct.toFixed(0)}%` : "–"} label="Cheaper than always-biggest" />
-        <Stat value={offline ? "–" : (s.leader ?? "–")} label="Winning right now" />
+        <Stat value={sp ? `$${sp.saved_usd.toFixed(2)}` : "–"} label="Saved" tone="red" />
       </div>
 
       {(broken.length > 0 || withheld.length > 0 || offline) && (
-        <p className="mt-3 border-l-2 border-brand-red bg-[color-mix(in_srgb,var(--sf-red)_8%,transparent)] py-2 pl-3 text-[14px] text-brand-red">
+        <p className="mt-3 border-l-2 border-brand-red py-2 pl-3 text-[14px] text-brand-red">
           {offline
             ? "Cannot reach the gateway."
             : broken.length > 0
-              ? `Switched off: ${broken.join(", ")} — these take no traffic until you restore them.`
-              : `The gateway is withholding ${withheld.join(", ")} after network trouble. It clears itself.`}
+              ? `Switched off: ${broken.join(", ")}`
+              : `The gateway is resting ${withheld.join(", ")} — it clears itself.`}
         </p>
       )}
 
-      <p className="mt-2 text-[13.5px] text-muted-ink">
-        &ldquo;Saved&rdquo; compares what this actually cost against sending every single question to
-        the most expensive model. <b>Winning right now</b> is the model taking the most traffic —
-        which is deliberately not always the one with the best score, because a slightly worse
-        model at a fraction of the price is usually the right answer.
-      </p>
+      {/* Which models are in play, and what each turned out to be good at. */}
+      <div className="mt-6">
+        <Roster />
+      </div>
 
-      <div className="mt-5">
+      <div className="mt-4">
         <HowItDecides />
       </div>
 
-      <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
-        <TrafficControl onChange={refresh} />
+      {/* The log gets the main position, not a strip at the edge. */}
+      <div className="mt-8">
+        <Decisions />
       </div>
 
-      {/* The log is not behind a tab. Whatever the speaker is showing, the
-          decisions are visible underneath it. */}
-      <div className="mt-4">
-        <LiveLog />
-      </div>
-
-      <nav className="mt-7 flex flex-wrap gap-1.5 border-b border-rule pb-3">
+      <nav className="mt-10 flex flex-wrap gap-1.5 border-b border-rule pb-3">
         {TABS.map((t) => (
           <button
             key={t.id}
@@ -110,12 +118,12 @@ export default function Page() {
       </nav>
 
       <div className="mt-8">
-        {tab === "chat" && <Chat />}
         {tab === "d1" && <DemoFanout />}
         {tab === "d2" && <DemoCache />}
+        {tab === "d3" && <Standings />}
         {tab === "d4" && <DemoKill onChange={refresh} />}
         {tab === "d5" && <DemoBudget />}
-        {tab === "log" && <Decisions />}
+        {tab === "chat" && <Chat />}
         {tab === "guard" && <Guardrails />}
       </div>
     </main>

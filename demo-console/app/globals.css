@@ -2,7 +2,12 @@
 
 /* The deck's tokens, not a second visual language. Red is a scalpel: the
    leading model, and the one thing that went wrong. If three things are red,
-   two of them are mistakes. */
+   two of them are mistakes.
+
+   Three theme states, not two. An explicit choice stamps data-theme on <html>;
+   the default "system" setting stamps nothing, and only prefers-color-scheme
+   separates light from dark there. Every token is declared on bare :root first
+   so nothing is defined solely inside a media query. */
 :root {
   --sf-canvas: #fffaf6;
   --sf-navy: #0e1126;
@@ -12,10 +17,12 @@
   --sf-rule: #e2dbd4;
   --sf-panel: #ffffff;
   --sf-good: #0f7a4d;
+  color-scheme: light;
 }
 
+/* System dark - but an explicit light choice still wins. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --sf-canvas: #0b0e1f;
     --sf-navy: #f4f1ec;
     --sf-warm-gray: #161a30;
@@ -24,7 +31,21 @@
     --sf-rule: #262b45;
     --sf-panel: #12162a;
     --sf-good: #4ade80;
+    color-scheme: dark;
   }
+}
+
+/* Explicit dark wins over a light OS. */
+:root[data-theme="dark"] {
+  --sf-canvas: #0b0e1f;
+  --sf-navy: #f4f1ec;
+  --sf-warm-gray: #161a30;
+  --sf-red: #ff5470;
+  --sf-gray: #a0a3b8;
+  --sf-rule: #262b45;
+  --sf-panel: #12162a;
+  --sf-good: #4ade80;
+  color-scheme: dark;
 }
 
 @theme inline {
@@ -46,7 +67,7 @@ html, body {
 }
 body { font-family: var(--font-manrope), ui-sans-serif, system-ui, sans-serif; }
 
-/* Projector legibility: nothing under 14px, and numbers line up. */
+/* Projector legibility: numbers line up. */
 .tabular { font-variant-numeric: tabular-nums; }
 
 @media (prefers-reduced-motion: reduce) {

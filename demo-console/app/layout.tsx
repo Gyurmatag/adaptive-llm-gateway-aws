@@ -23,6 +23,17 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
+      <head>
+        {/* Applied before first paint, so a dark-mode viewer never sees a
+            white flash and a light-mode viewer never sees a dark one. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              "try{var t=localStorage.getItem('theme');" +
+              "if(t==='dark'||t==='light')document.documentElement.setAttribute('data-theme',t);}catch(e){}",
+          }}
+        />
+      </head>
       <body className={`${bricolage.variable} ${manrope.variable} antialiased`}>{children}</body>
     </html>
   );
