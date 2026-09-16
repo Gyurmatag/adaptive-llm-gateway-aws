@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { Panel, Button, Label, Stat } from "./ui";
-import { Explain } from "./Explain";
 import { api } from "@/lib/base";
 
 type Fan = { model: string; ok: boolean; ms: number; text: string; servedBy: string | null };
@@ -53,10 +52,6 @@ export function DemoFanout() {
     <section className="flex flex-col gap-4">
       <Header n="Demo 1" title="One endpoint, every model"
         blurb="The same request, the same shape, three different vendors. Nothing in the application code knows which one answered." />
-      <Explain title="What you are about to see">
-        <p>The same question goes to three companies&rsquo; models — Anthropic, Amazon and OpenAI.</p>
-        <p>One address, one request, three vendors. The app never knows which one answered.</p>
-      </Explain>
       <p className="rounded-sm border border-rule bg-warm-gray px-4 py-3 font-mono text-[13px] text-navy">{prompt}</p>
       <div><Button onClick={run} disabled={busy}>{busy ? "Asking all three…" : "Ask all three"}</Button></div>
       {rows && (
@@ -82,92 +77,94 @@ export function DemoFanout() {
 }
 
 export function DemoCache() {
-  const [res, setRes] = useState<any>(null);
+  const [input, setInput] = useState("What is the capital of Latvia?");
+  const [asks, setAsks] = useState<any[]>([]);
   const [busy, setBusy] = useState(false);
-  const [country, setCountry] = useState("Latvia");
 
-  async function run() {
-    setBusy(true); setRes(null);
-    const r = await fetch(api("/api/cache"), {
+  async function ask(e?: React.FormEvent) {
+    e?.preventDefault();
+    const q = input.trim();
+    if (!q || busy) return;
+    setBusy(true);
+    const r = await fetch(api("/api/ask"), {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        cold: `What is the capital of ${country}?`,
-        reworded: `Which city is the capital of ${country}?`,
-      }),
+      body: JSON.stringify({ prompt: q }),
     }).then((x) => x.json()).catch(() => null);
-    setRes(r); setBusy(false);
+    if (r) setAsks((prev) => [...prev, r]);
+    setBusy(false);
+    setInput("");
   }
+
+  const first = asks[0];
+  const hit = asks.find((a) => a.cached);
 
   return (
     <section className="flex flex-col gap-4">
       <Header n="Demo 2" title="The semantic cache"
-        blurb="Ask it cold, then ask the same thing in different words. A meaning match, not a string match - no tokens, no routing decision, no spend." />
-      <Explain title="What you are about to see">
-        <p>We ask a question, then ask <b>the same thing in different words</b>.</p>
-        <p>The second one comes back in a fraction of the time — because the gateway recognised
-        it <i>means</i> the same thing and reused the first answer.</p>
-        <p>No model was called. Nothing was billed. Watch the two numbers underneath.</p>
-      </Explain>
-      <div className="flex flex-wrap items-center gap-2">
-        <Label>Country</Label>
+        blurb="Ask something. Then ask the same thing in different words." />
+
+      <form onSubmit={ask} className="flex flex-wrap gap-2">
         <input
-          id="cache-country" value={country} onChange={(e) => setCountry(e.target.value)}
-          className="w-44 rounded-sm border border-rule bg-transparent px-3 py-2 text-[15px] text-navy outline-none focus-visible:border-navy"
+          id="cache-q" value={input} onChange={(e) => setInput(e.target.value)}
+          placeholder={asks.length ? "Now ask the same thing in different words…" : "Ask anything…"}
+          autoFocus
+          className="min-w-0 flex-1 rounded-sm border border-rule bg-transparent px-4 py-2.5 text-[15px] text-navy outline-none placeholder:text-muted-ink focus-visible:border-navy"
         />
-        <Button onClick={run} disabled={busy || !country.trim()}>{busy ? "Asking twice…" : "Ask, then reword"}</Button>
-      </div>
-      <p className="text-[13px] text-muted-ink">
-        Use a country you have not asked today — anything already cached shows no contrast.
-      </p>
-      {res && (
-        <Panel className="p-5">
-          <div className="grid gap-5 sm:grid-cols-3">
-            <Stat value={`${res.cold?.ms ?? "–"} ms`} label="Cold ask" />
-            <Stat value={`${res.reworded?.ms ?? "–"} ms`} label="Reworded" tone={res.hit ? "good" : "ink"} />
-            <Stat
-              value={res.hit ? Number(res.reworded.similarity).toFixed(3) : "miss"}
-              label="Similarity" tone={res.hit ? "red" : "ink"}
-            />
+        <Button type="submit" disabled={busy || !input.trim()}>
+          {busy ? "Asking…" : asks.length ? "Ask again" : "Ask"}
+        </Button>
+        {asks.length > 0 && (
+          <Button tone="quiet" disabled={busy} onClick={() => setAsks([])}>Clear</Button>
+        )}
+      </form>
+
+      {asks.length === 1 && !busy && (
+        <p className="text-[14px] text-muted-ink">
+          Now reword it — same meaning, different words — and ask again.
+        </p>
+      )}
+
+      {asks.map((a, i) => (
+        <Panel key={i} className="p-5">
+          <div className="flex flex-wrap items-baseline justify-between gap-3">
+            <p className="font-mono text-[13.5px] text-navy">{a.prompt}</p>
+            <span className={`rounded-[2px] px-2 py-0.5 font-mono text-[11px] font-bold uppercase ${
+              a.cached ? "bg-good/15 text-good" : "border border-rule text-muted-ink"}`}>
+              {a.cached ? "from cache" : "asked a model"}
+            </span>
           </div>
-          <p className="mt-4 border-t border-rule pt-4 text-[14px] text-navy">
-            {res.hit
-              ? `Different words, same meaning — served from cache, ${res.speedup}x faster.`
-              : "No semantic hit. Either this question is already cached from a previous ask, or the semantic cache sidecar is missing."}
+
+          <div className="mt-4 flex flex-wrap gap-x-10 gap-y-4">
+            <Stat value={`${a.ms} ms`} label="Time" tone={a.cached ? "good" : "ink"} />
+            <Stat value={a.model ?? "—"} label="Answered by" />
+            <Stat value={a.totalTokens ?? "—"} label="Tokens in the reply" />
+            <Stat value={`$${Number(a.billedUsd ?? 0).toFixed(8)}`} label="Actually billed"
+                  tone={Number(a.billedUsd ?? 0) === 0 ? "good" : "red"} />
+            <Stat value={a.billedTokens ?? "—"} label="Tokens billed"
+                  tone={a.billedTokens === 0 ? "good" : "ink"} />
+            {a.cached && <Stat value={Number(a.similarity).toFixed(3)} label="Similarity" tone="red" />}
+          </div>
+
+          <p className="mt-4 border-t border-rule pt-3 text-[14px] leading-relaxed text-navy">
+            {a.ok ? a.text : "failed"}
           </p>
 
-          <div className="mt-4 grid gap-5 border-t border-rule pt-4 sm:grid-cols-2">
-            <div className="flex flex-col gap-3">
-              <Asked text={`What is the capital of ${country}?`} />
-              <Answer text={res.cold?.text ?? ""} by={res.cold?.servedBy} />
-            </div>
-            <div className="flex flex-col gap-3">
-              <Asked text={`Which city is the capital of ${country}?`} />
-              <Answer text={res.reworded?.text ?? ""} by={res.reworded?.servedBy} />
-            </div>
-          </div>
-          {res.hit && (
-            <p className="mt-3 text-[14px] text-navy">
-              <b>The two answers are identical</b> — word for word. That is not two models
-              agreeing; it is the same answer, handed back without asking anyone.
+          {a.cached && a.headerCostUsd && (
+            <p className="mt-3 text-[12.5px] text-muted-ink">
+              The response header claims <span className="font-mono">{a.headerCostUsd}</span>. Ignore
+              it — LiteLLM replays the cached answer with its original usage attached. The
+              gateway&rsquo;s own counters are what moved, and they didn&rsquo;t.
             </p>
           )}
-          {res.hit && (
-            <div className="mt-3 rounded-sm bg-warm-gray px-4 py-3">
-              <p className="text-[14px] text-navy">
-                Billed for that answer:{" "}
-                <b className="text-good">${(res.spentUsd ?? 0).toFixed(8)}</b> and{" "}
-                <b className="text-good">{res.tokens ?? 0} tokens</b>. No model was called.
-              </p>
-              {res.headerCost && (
-                <p className="mt-1.5 text-[13px] text-muted-ink">
-                  The response header says <span className="font-mono">{res.headerCost}</span> — ignore it.
-                  LiteLLM replays the cached answer complete with the original usage, so a hit
-                  looks billed. The gateway&rsquo;s own counters are the ones that moved, and they didn&rsquo;t.
-                </p>
-              )}
-            </div>
-          )}
         </Panel>
+      ))}
+
+      {first && hit && (
+        <p className="text-[15px] text-navy">
+          <b>{(first.ms / Math.max(hit.ms, 1)).toFixed(1)}x faster</b>, {hit.billedTokens ?? 0} tokens
+          and ${Number(hit.billedUsd ?? 0).toFixed(8)} billed — different words, same meaning, same
+          answer handed straight back.
+        </p>
       )}
     </section>
   );
@@ -200,13 +197,7 @@ export function DemoKill({ onChange }: { onChange: () => void }) {
   return (
     <section className="flex flex-col gap-4">
       <Header n="Demo 4" title="Kill the primary"
-        blurb="Ask twelve questions, switch a model off mid-flight, ask twelve more. Watch where the answers come from - and watch the failure count." />
-      <Explain title="What you are about to see">
-        <p>Twelve questions go out. Then we switch a model off. Then twelve more go out.</p>
-        <p>The answers simply come from somewhere else — and <b>nothing fails</b>. Nobody using
-        the app would notice anything happened.</p>
-      </Explain>
-
+        blurb="Twelve questions, switch a model off mid-flight, twelve more. The answers come from somewhere else and nothing fails." />
       <div className="flex flex-wrap items-center gap-2">
         <Label>Switch off</Label>
         <div className="flex flex-wrap gap-1.5">
@@ -296,11 +287,6 @@ export function DemoBudget() {
     <section className="flex flex-col gap-4">
       <Header n="Demo 5" title="The budget key"
         blurb="A virtual key with a ceiling of a fraction of a cent, spent live until the gateway refuses it." />
-      <Explain title="What you are about to see">
-        <p>We create an API key with a spending limit of two hundredths of a cent, then spend it.</p>
-        <p>After a handful of questions the gateway simply refuses it. That is a budget being
-        enforced, not an outage — and it is per key, so one team cannot spend another&rsquo;s money.</p>
-      </Explain>
       <div><Button onClick={run} disabled={busy}>{busy ? "Spending it…" : "Mint a $0.0002 key and spend it"}</Button></div>
       {res && (
         <Panel className="p-5">

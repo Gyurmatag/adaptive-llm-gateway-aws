@@ -1,10 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Panel, Label } from "./ui";
+import { Panel } from "./ui";
 import { useAuditStream } from "@/lib/useAudit";
 import { describeEntry, kindOf } from "@/lib/describe";
-import { Explain } from "./Explain";
 
 export function Decisions() {
   const [live, setLive] = useState(true);
@@ -22,25 +21,6 @@ export function Decisions() {
 
   return (
     <section className="flex flex-col gap-4">
-      <div>
-        <Label>Audit log</Label>
-        <h2 className="mt-1 font-[family-name:var(--font-bricolage)] text-[26px] font-extrabold leading-tight tracking-[-0.01em]">
-          Every decision, and why
-        </h2>
-        <p className="mt-2 max-w-[62ch] text-[15px] text-muted-ink">
-          Streamed as it happens. &ldquo;The router changed its mind&rdquo; is not an answer for a
-          risk committee — so the reason is recorded, with the cost of the arm it chose and the
-          score for every arm it considered.
-        </p>
-      </div>
-
-      <Explain title="Reading this log">
-        <p><b>ROUTE</b> — the gateway chose a model, and why it chose that one.</p>
-        <p><b>REWARD</b> — a grader scored an answer out of 1. That score is what moves the
-        model&rsquo;s standing up or down. This is the learning, happening in front of you.</p>
-        <p>Watch one model consistently score lower than the rest: that is the one the gateway
-        is quietly walking away from.</p>
-      </Explain>
       <div className="flex flex-wrap items-center gap-2">
         {(["all", "route", "reward"] as const).map((k) => (
           <button key={k} type="button" onClick={() => setOnly(k)}
@@ -81,10 +61,6 @@ export function Decisions() {
           })}
         </div>
       </Panel>
-
-      <p className="text-[13px] text-muted-ink">
-        The same file the gateway writes to disk, streamed live — not a reconstruction.
-      </p>
     </section>
   );
 }

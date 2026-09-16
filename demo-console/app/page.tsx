@@ -5,7 +5,6 @@ import { Chat } from "@/components/Chat";
 import { DemoFanout, DemoCache, DemoKill, DemoBudget } from "@/components/Demos";
 import { Standings } from "@/components/Standings";
 import { Decisions } from "@/components/Decisions";
-import { Guardrails } from "@/components/Guardrails";
 import { Compare } from "@/components/Compare";
 import { Roster } from "@/components/Roster";
 import { HowItDecides } from "@/components/Explain";
@@ -22,7 +21,6 @@ const TABS = [
   { id: "d5", label: "Demo 5 · budget" },
   { id: "chat", label: "Chat" },
   { id: "cmp", label: "vs OpenRouter" },
-  { id: "guard", label: "Guardrails" },
 ] as const;
 
 export default function Page() {
@@ -113,7 +111,6 @@ export default function Page() {
         {tab === "d5" && <DemoBudget />}
         {tab === "chat" && <Chat />}
         {tab === "cmp" && <Compare />}
-        {tab === "guard" && <Guardrails />}
       </div>
     </main>
   );

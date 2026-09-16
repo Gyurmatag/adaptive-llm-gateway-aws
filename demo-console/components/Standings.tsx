@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Curves, TrafficSplit } from "./Curves";
-import { Explain } from "./Explain";
 import { Stat, Button } from "./ui";
 import { api } from "@/lib/base";
 
@@ -42,17 +41,11 @@ export function Standings() {
           What the router believes
         </h2>
         <p className="mt-2 max-w-[62ch] text-[15px] text-muted-ink">
-          How likely each model is to give a good-enough answer — built from{" "}
-          {graded.toLocaleString()} graded answers.
+          How likely each model is to give a good-enough answer, from{" "}
+          {graded.toLocaleString()} graded answers. Further right is better; narrower means
+          more certain.
         </p>
       </div>
-
-      <Explain title="Reading this chart">
-        <p>Further <b>right</b> means better answers. <b>Narrower</b> means the gateway is more
-        sure about it.</p>
-        <p>A wide, flat curve means it has not made its mind up yet — so it keeps trying that
-        model until it has.</p>
-      </Explain>
 
       <div className="flex flex-wrap items-center gap-3">
         <Button onClick={warmUp} disabled={busy}>
