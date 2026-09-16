@@ -8,8 +8,8 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const { action, rate } = await req.json().catch(() => ({ action: "status" }));
-  if (action === "start") return NextResponse.json(start(Number(rate) || 3));
+  const { action, rate, mode } = await req.json().catch(() => ({ action: "status" }));
+  if (action === "start") return NextResponse.json(start(Number(rate) || 3, mode === "both" ? "both" : "gateway"));
   if (action === "stop") return NextResponse.json(stop());
   return NextResponse.json(status());
 }

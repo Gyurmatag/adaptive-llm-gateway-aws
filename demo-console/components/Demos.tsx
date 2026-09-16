@@ -7,6 +7,34 @@ import { api } from "@/lib/base";
 
 type Fan = { model: string; ok: boolean; ms: number; text: string; servedBy: string | null };
 
+/** What was asked. Shown verbatim, because "trust me, I asked something" is
+ *  not a demo. */
+function Asked({ text }: { text: string }) {
+  return (
+    <div>
+      <Label>Asked</Label>
+      <p className="mt-1.5 rounded-sm border border-rule bg-warm-gray px-4 py-2.5 font-mono text-[13px] text-navy">
+        {text}
+      </p>
+    </div>
+  );
+}
+
+/** What came back. */
+function Answer({ text, by }: { text: string; by?: string | null }) {
+  return (
+    <div>
+      <div className="flex items-baseline justify-between gap-2">
+        <Label>Answer</Label>
+        {by && <span className="font-mono text-[11.5px] text-muted-ink">from {by}</span>}
+      </div>
+      <p className="mt-1.5 rounded-sm border border-rule px-4 py-2.5 text-[14px] leading-relaxed text-navy">
+        {text || "—"}
+      </p>
+    </div>
+  );
+}
+
 export function DemoFanout() {
   const [rows, setRows] = useState<Fan[] | null>(null);
   const [busy, setBusy] = useState(false);
@@ -40,6 +68,11 @@ export function DemoFanout() {
                 <span className="tabular text-[13px] text-muted-ink">{r.ms} ms</span>
               </div>
               <p className="mt-2 text-[14px] leading-relaxed text-navy">{r.ok ? r.text : "failed"}</p>
+              {r.servedBy && (
+                <p className="mt-2 border-t border-rule pt-2 font-mono text-[11.5px] text-muted-ink">
+                  served by {r.servedBy}
+                </p>
+              )}
             </Panel>
           ))}
         </div>
@@ -101,6 +134,23 @@ export function DemoCache() {
               ? `Different words, same meaning — served from cache, ${res.speedup}x faster.`
               : "No semantic hit. Either this question is already cached from a previous ask, or the semantic cache sidecar is missing."}
           </p>
+
+          <div className="mt-4 grid gap-5 border-t border-rule pt-4 sm:grid-cols-2">
+            <div className="flex flex-col gap-3">
+              <Asked text={`What is the capital of ${country}?`} />
+              <Answer text={res.cold?.text ?? ""} by={res.cold?.servedBy} />
+            </div>
+            <div className="flex flex-col gap-3">
+              <Asked text={`Which city is the capital of ${country}?`} />
+              <Answer text={res.reworded?.text ?? ""} by={res.reworded?.servedBy} />
+            </div>
+          </div>
+          {res.hit && (
+            <p className="mt-3 text-[14px] text-navy">
+              <b>The two answers are identical</b> — word for word. That is not two models
+              agreeing; it is the same answer, handed back without asking anyone.
+            </p>
+          )}
           {res.hit && (
             <div className="mt-3 rounded-sm bg-warm-gray px-4 py-3">
               <p className="text-[14px] text-navy">
@@ -125,39 +175,105 @@ export function DemoCache() {
 
 export function DemoKill({ onChange }: { onChange: () => void }) {
   const [busy, setBusy] = useState(false);
-  const [disabled, setDisabled] = useState<string[]>([]);
+  const [res, setRes] = useState<any>(null);
+  const [arm, setArm] = useState("claude-haiku");
   const arms = ["claude-haiku", "claude-sonnet", "nova-lite", "gpt-on-bedrock", "ipr-nova"];
 
-  async function act(action: "disable" | "enable", arm?: string) {
-    setBusy(true);
-    const r = await fetch(api("/api/arm"), {
+  async function drill() {
+    setBusy(true); setRes(null);
+    const r = await fetch(api("/api/failover"), {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action, arm }),
+      body: JSON.stringify({ arm }),
     }).then((x) => x.json()).catch(() => null);
-    setDisabled(r?.disabled ?? []);
-    setBusy(false); onChange();
+    setRes(r); setBusy(false); onChange();
+  }
+
+  async function restore() {
+    setBusy(true);
+    await fetch(api("/api/failover"), {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "restore" }),
+    }).catch(() => null);
+    setRes(null); setBusy(false); onChange();
   }
 
   return (
     <section className="flex flex-col gap-4">
       <Header n="Demo 4" title="Kill the primary"
-        blurb="Take out the model taking most of the traffic, then say nothing for thirty seconds and let them watch the error counter refuse to move." />
+        blurb="Ask twelve questions, switch a model off mid-flight, ask twelve more. Watch where the answers come from - and watch the failure count." />
       <Explain title="What you are about to see">
-        <p>We switch off whichever model is currently doing most of the work.</p>
-        <p>Traffic moves to the others within seconds — and the <b>failed answers</b> counter at the
-        top of the screen never leaves zero.</p>
-        <p>Nobody using the app would notice anything happened.</p>
+        <p>Twelve questions go out. Then we switch a model off. Then twelve more go out.</p>
+        <p>The answers simply come from somewhere else — and <b>nothing fails</b>. Nobody using
+        the app would notice anything happened.</p>
       </Explain>
-      <div className="flex flex-wrap gap-2">
-        {arms.map((a) => (
-          <Button key={a} tone="danger" disabled={busy} onClick={() => act("disable", a)}>Kill {a}</Button>
-        ))}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Label>Switch off</Label>
+        <div className="flex flex-wrap gap-1.5">
+          {arms.map((a) => (
+            <button key={a} type="button" onClick={() => setArm(a)}
+              className={`rounded-sm border px-3 py-1.5 text-[13px] font-semibold transition-colors ${
+                arm === a ? "border-navy bg-navy text-canvas" : "border-rule text-muted-ink hover:text-navy"}`}>
+              {a}
+            </button>
+          ))}
+        </div>
       </div>
-      <div><Button tone="quiet" disabled={busy} onClick={() => act("enable")}>Restore everything</Button></div>
-      {disabled.length > 0 && (
-        <p className="border-l-2 border-brand-red pl-3 text-[14px] text-brand-red">
-          Broken out of the circuit: {disabled.join(", ")} — restore before Demo 5.
-        </p>
+
+      <div className="flex flex-wrap gap-2">
+        <Button tone="danger" disabled={busy} onClick={drill}>
+          {busy ? "Running the drill…" : `Run it — 12 questions, kill ${arm}, 12 more`}
+        </Button>
+        <Button tone="quiet" disabled={busy} onClick={restore}>Restore everything</Button>
+      </div>
+
+      {res && (
+        <Panel className="p-5">
+          <div className="grid gap-6 sm:grid-cols-2">
+            <div>
+              <Label>Before — who answered</Label>
+              <ul className="mt-2 space-y-1">
+                {res.before?.map(([m, n]: [string, number]) => (
+                  <li key={m} className="flex justify-between text-[14px]">
+                    <span className={m === res.arm ? "font-bold text-navy" : "text-muted-ink"}>{m}</span>
+                    <span className="tabular text-muted-ink">{n}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div>
+              <Label>After — who answered</Label>
+              <ul className="mt-2 space-y-1">
+                {res.after?.map(([m, n]: [string, number]) => (
+                  <li key={m} className="flex justify-between text-[14px]">
+                    <span className="text-muted-ink">{m}</span>
+                    <span className="tabular text-muted-ink">{n}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+          {res.prompt && (
+            <div className="mt-5 border-t border-rule pt-4">
+              <Asked text={res.prompt} />
+              <div className="mt-3 grid gap-4 sm:grid-cols-2">
+                {res.beforeSample && <Answer text={res.beforeSample.text} by={`${res.beforeSample.model} · before`} />}
+                {res.afterSample && <Answer text={res.afterSample.text} by={`${res.afterSample.model} · after`} />}
+              </div>
+            </div>
+          )}
+          <div className="mt-5 flex flex-wrap items-baseline gap-x-8 gap-y-2 border-t border-rule pt-4">
+            <Stat value={res.failed} label="Failed answers" tone={res.failed === 0 ? "good" : "red"} />
+            <p className="text-[15px] text-navy">
+              {res.stillServing
+                ? `${res.arm} is still answering — give the breaker a moment and run it again.`
+                : `${res.arm} answered ${res.before?.find(([m]: [string, number]) => m === res.arm)?.[1] ?? 0} of the first twelve and none of the last twelve.`}
+            </p>
+          </div>
+          <p className="mt-3 text-[14px] text-muted-ink">
+            Click <b>Restore everything</b> before the next demo.
+          </p>
+        </Panel>
       )}
     </section>
   );
@@ -193,13 +309,22 @@ export function DemoBudget() {
             <Stat value={`${(res.totalMs / 1000).toFixed(1)} s`} label="Time to block" />
             <Stat value={res.blocked ? "Blocked" : "Not blocked"} label="Outcome" tone={res.blocked ? "red" : "ink"} />
           </div>
+          {res.prompt && (
+            <div className="mt-5 flex flex-col gap-3 border-t border-rule pt-4">
+              <Asked text={res.prompt} />
+              {res.sample && <Answer text={res.sample} by="while the key still had budget" />}
+            </div>
+          )}
           <div className="mt-4 border-t border-rule pt-4">
             <p className="text-[14px] text-navy">
-              Transport status <b className="tabular">HTTP {res.transportStatus}</b> — the block is in the
-              body, not the status code. <b className="text-brand-red">Never call it a 429.</b>
+              Then the same question, once the money ran out:
             </p>
-            <p className="mt-2 font-mono text-[12.5px] text-muted-ink">
+            <p className="mt-2 rounded-sm border border-brand-red/40 px-4 py-2.5 font-mono text-[12.5px] text-brand-red">
               {res.attempts?.[res.attempts.length - 1]?.detail}
+            </p>
+            <p className="mt-3 text-[14px] text-navy">
+              Transport status <b className="tabular">HTTP {res.transportStatus}</b> — the refusal is in
+              the body, not the status code. <b className="text-brand-red">Never call it a 429.</b>
             </p>
           </div>
         </Panel>

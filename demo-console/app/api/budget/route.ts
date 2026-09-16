@@ -27,7 +27,11 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "could not mint a budget key" }, { status: 502 });
   }
 
+  const PROMPT = "Write three sentences about databases.";
   const attempts: { n: number; ms: number; status: number; blocked: boolean; detail: string }[] = [];
+  // One real answer from before the ceiling was hit, so the demo shows the key
+  // working before it shows it refused.
+  let sample: string | null = null;
   const started = Date.now();
   for (let n = 1; n <= 12; n++) {
     const t = Date.now();
@@ -36,7 +40,7 @@ export async function POST(req: Request) {
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         model: "demo-router",
-        messages: [{ role: "user", content: "Write three sentences about databases." }],
+        messages: [{ role: "user", content: PROMPT }],
         max_tokens: 300,
         cache: { "no-cache": true },
       }),
@@ -44,6 +48,9 @@ export async function POST(req: Request) {
     });
     const body = await res.json().catch(() => ({}));
     const blocked = body?.error?.type === "budget_exceeded";
+    if (!blocked && !sample && body?.choices?.[0]?.message?.content) {
+      sample = body.choices[0].message.content;
+    }
     attempts.push({
       n,
       ms: Date.now() - t,
@@ -56,6 +63,8 @@ export async function POST(req: Request) {
 
   const last = attempts[attempts.length - 1];
   return NextResponse.json({
+    prompt: PROMPT,
+    sample,
     attempts,
     blocked: Boolean(last?.blocked),
     requests: attempts.length,

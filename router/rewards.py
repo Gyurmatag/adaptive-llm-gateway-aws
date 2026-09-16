@@ -185,6 +185,12 @@ async def judge_score(question: str, answer: str) -> float | None:
             # A cached judge is worse than no judge: it is a constant reward
             # signal wearing the costume of a real one.
             caching=False,
+            # caching=False alone was not enough: judge answers still reached
+            # the semantic cache, and a multi-turn chat request - question,
+            # answer, follow-up - embeds close enough to a judge prompt to
+            # match one. Observed live at similarity 0.89: a user asked "write
+            # it in typescript" and was handed back {"score": 0.8}.
+            cache={"no-cache": True, "no-store": True},
         )
         return _extract_score(resp.choices[0].message.content or "")
     except Exception as e:  # noqa: BLE001

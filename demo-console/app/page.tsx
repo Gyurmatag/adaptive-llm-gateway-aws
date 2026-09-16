@@ -6,8 +6,10 @@ import { DemoFanout, DemoCache, DemoKill, DemoBudget } from "@/components/Demos"
 import { Standings } from "@/components/Standings";
 import { Decisions } from "@/components/Decisions";
 import { Guardrails } from "@/components/Guardrails";
+import { Compare } from "@/components/Compare";
 import { Roster } from "@/components/Roster";
 import { HowItDecides } from "@/components/Explain";
+import { TrafficControl } from "@/components/TrafficControl";
 import { Stat } from "@/components/ui";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { api } from "@/lib/base";
@@ -19,6 +21,7 @@ const TABS = [
   { id: "d4", label: "Demo 4 · kill" },
   { id: "d5", label: "Demo 5 · budget" },
   { id: "chat", label: "Chat" },
+  { id: "cmp", label: "vs OpenRouter" },
   { id: "guard", label: "Guardrails" },
 ] as const;
 
@@ -36,25 +39,6 @@ export default function Page() {
     const t = setInterval(refresh, 4000);
     return () => clearInterval(t);
   }, [refresh]);
-
-  // Traffic starts itself when the page is opened. There is nothing to press
-  // and nothing to remember: the curves need a stream of questions to learn
-  // from, and asking a speaker to start it is one more thing to forget on
-  // stage. It stops itself when nobody has had the page open for a while.
-  useEffect(() => {
-    fetch(api("/api/traffic"), { cache: "no-store" })
-      .then((r) => r.json())
-      .then((s) => {
-        if (!s?.running) {
-          return fetch(api("/api/traffic"), {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ action: "start", rate: 3 }),
-          });
-        }
-      })
-      .catch(() => {});
-  }, []);
 
   const s = live?.state;
   const sp = live?.spend;
@@ -97,6 +81,10 @@ export default function Page() {
         <HowItDecides />
       </div>
 
+      <div className="mt-5">
+        <TrafficControl onChange={refresh} />
+      </div>
+
       {/* The log gets the main position, not a strip at the edge. */}
       <div className="mt-8">
         <Decisions />
@@ -124,6 +112,7 @@ export default function Page() {
         {tab === "d4" && <DemoKill onChange={refresh} />}
         {tab === "d5" && <DemoBudget />}
         {tab === "chat" && <Chat />}
+        {tab === "cmp" && <Compare />}
         {tab === "guard" && <Guardrails />}
       </div>
     </main>
