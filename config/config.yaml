@@ -148,8 +148,8 @@ model_list:
     model_info:
       id: claude-sonnet
       arm: true
-      input_cost_per_token: 0.000003
-      output_cost_per_token: 0.000015
+      input_cost_per_token: 0.0000033
+      output_cost_per_token: 0.0000165
 
   - model_name: demo-router
     litellm_params:
@@ -158,8 +158,8 @@ model_list:
     model_info:
       id: claude-haiku
       arm: true
-      input_cost_per_token: 0.000001
-      output_cost_per_token: 0.000005
+      input_cost_per_token: 0.0000011
+      output_cost_per_token: 0.0000055
 
   - model_name: demo-router
     litellm_params:
@@ -168,8 +168,8 @@ model_list:
     model_info:
       id: gpt-on-bedrock
       arm: true
-      input_cost_per_token: 0.00000015
-      output_cost_per_token: 0.0000006
+      input_cost_per_token: 0.0000002
+      output_cost_per_token: 0.00000079
 
   - model_name: demo-router
     litellm_params:
@@ -178,8 +178,8 @@ model_list:
     model_info:
       id: nova-lite
       arm: true
-      input_cost_per_token: 0.00000006
-      output_cost_per_token: 0.00000024
+      input_cost_per_token: 0.000000078
+      output_cost_per_token: 0.000000312
 
   - model_name: demo-router
     litellm_params:
@@ -188,8 +188,8 @@ model_list:
     model_info:
       id: ipr-nova
       arm: true
-      input_cost_per_token: 0.00000035
-      output_cost_per_token: 0.0000014
+      input_cost_per_token: 0.000000564
+      output_cost_per_token: 0.000002256
 
 # ------------------------------------------------------------------ router cfg
 router_settings:

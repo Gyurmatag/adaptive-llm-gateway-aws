@@ -43,7 +43,11 @@ ENV ROUTER_GAMMA=0.10 \
     ROUTER_EXPLORE_P=0.40 \
     ROUTER_DECAY_LAMBDA=0.995 \
     ROUTER_DECAY_EVERY=40 \
-    JUDGE_SAMPLE_RATE=0.50 \
+    # Grade EVERY answer, not half of them. With a background load generator
+    # running at 3/s, half was plenty and saved judge calls. Nothing runs in
+    # the background now - evidence only exists because someone pressed a
+    # button - so every answer has to count or the curves never fill in.
+    JUDGE_SAMPLE_RATE=1.0 \
     JUDGE_SCORE_THRESHOLD=0.85 \
     ROUTER_GROUP=demo-router \
     ROUTER_MODE=learn \
